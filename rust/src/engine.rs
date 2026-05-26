@@ -167,6 +167,14 @@ impl TerminalEngine {
         self.parser.advance(&mut self.term, &bytes);
     }
 
+    pub fn resize(&mut self, columns: u16, rows: u16) {
+        let size = alacritty_terminal::term::test::TermSize::new(
+            columns as usize,
+            rows as usize,
+        );
+        self.term.resize(size);
+    }
+
     pub fn snapshot(&self) -> RenderSnapshot {
         let cols = self.term.columns() as u16;
         let rows = self.term.screen_lines() as u16;
@@ -244,5 +252,15 @@ mod tests {
         let snap = engine.snapshot();
         assert_eq!(char::from_u32(cell_at(&snap, 0, 0).codepoint).unwrap(), 'a');
         assert_eq!(char::from_u32(cell_at(&snap, 1, 0).codepoint).unwrap(), 'b');
+    }
+
+    #[test]
+    fn resize_changes_reported_dimensions() {
+        let mut engine = TerminalEngine::new(20, 5);
+        engine.resize(40, 10);
+        let snap = engine.snapshot();
+        assert_eq!(snap.columns, 40);
+        assert_eq!(snap.rows, 10);
+        assert_eq!(snap.cells.len(), 400);
     }
 }
