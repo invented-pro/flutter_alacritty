@@ -63,7 +63,7 @@ flutter run -d linux
 | `TermSize` via `term::test::TermSize` | **Used as written** — exported and works |
 | `Flags::ALL_UNDERLINES` | **Exists** — used in `map_flags` |
 | `indexed.cell` on `display_iter` | **Works** — `indexed.cell` field access |
-| Path dep `../../../opensource/alacritty/alacritty_terminal` | **Requires** repo-root symlink `flutter_alacritty/opensource` → `/home/hhoa/git/opensource` when building from `.worktrees/tracer-bullet/rust` |
+| Path dep `../../../opensource/alacritty/alacritty_terminal` | **Replaced** (post-review) with a git dep pinned to `rev = 55f12aae` — reproducible on any machine, no symlink. Local-hacking `[patch]` provided (commented) in `rust/Cargo.toml`. |
 | `home` crate | **Pinned** to `0.5.9` in `Cargo.lock` for rustc 1.86 (plan assumes 1.93+) |
 
 ## Other implementation notes

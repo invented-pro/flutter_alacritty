@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -28,6 +30,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   TerminalEngine? _engine;
   PtyBackend? _pty;
+  StreamSubscription<Uint8List>? _outputSub;
   int _cols = 0, _rows = 0;
 
   void _ensureStarted(int cols, int rows) {
@@ -44,10 +47,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _rows = rows;
     _engine = engineNew(columns: cols, rows: rows);
     _pty = FlutterPtyBackend(rows: rows, columns: cols);
-    _pty!.output.listen(_onOutput);
+    _outputSub = _pty!.output.listen(_onOutput);
   }
 
   void _onOutput(Uint8List bytes) {
+    if (!mounted || _engine == null) return;
     engineAdvance(engine: _engine!, bytes: bytes);
     _pushSnapshot();
   }
@@ -79,7 +83,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   void dispose() {
+    _outputSub?.cancel();
     _pty?.kill();
+    _grid.dispose();
     _focus.dispose();
     super.dispose();
   }
