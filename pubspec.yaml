@@ -14,6 +14,7 @@ dependencies:
   flutter_rust_bridge: 2.12.0
   rust_lib_flutter_alacritty:
     path: rust_builder
+  flutter_pty: ^0.4.0
 
 dev_dependencies:
   flutter_test:
