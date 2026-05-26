@@ -1,30 +1,33 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_alacritty/main.dart';
+import 'package:flutter_alacritty/src/rust/frb_generated.dart';
+
+const _linuxLib =
+    'build/linux/x64/release/bundle/lib/librust_lib_flutter_alacritty.so';
+
+Future<void> _initRustLib() async {
+  final libFile = File(_linuxLib);
+  if (!libFile.existsSync()) {
+    return;
+  }
+  await RustLib.init(
+    externalLibrary: ExternalLibrary.open(libFile.absolute.path),
+  );
+}
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  setUpAll(_initRustLib);
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
-  });
+  testWidgets(
+    'Rust greet round-trip',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(const MyApp());
+      expect(find.textContaining('Hello, Tom!'), findsOneWidget);
+    },
+    skip: !File(_linuxLib).existsSync(),
+  );
 }
