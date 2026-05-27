@@ -92,8 +92,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
   // schedules a drain — so no per-frame setState rebuild is needed.
 
   void _ensureStarted(int cols, int rows) {
-    if (_status == TermStatus.running && _client != null) {
-      if (cols != _cols || rows != _rows) {
+    if (_client != null) {
+      if ((cols != _cols || rows != _rows) && _status == TermStatus.running) {
         _cols = cols;
         _rows = rows;
         _client!.resize(cols, rows);
@@ -104,7 +104,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
     _cols = cols;
     _rows = rows;
-    if (_status == TermStatus.running && _client == null) {
+    // Avoid re-entering _start each frame while `_client == null` and
+    // `_status == error` (spawn failure); user retry goes through `_restart`.
+    if (_status != TermStatus.error) {
       _start(cols, rows);
     }
   }
@@ -146,25 +148,20 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   void _exitIfCurrent(PtyBackend p, int? code) {
     if (!identical(_pty, p)) return;
-    _outputSub?.cancel();
-    _outputSub = null;
-    _focus.removeListener(_reportFocus);
-    _pty?.kill();
-    _pty = null;
-    _client?.dispose();
-    _client = null;
-    _status = TermStatus.exited;
-    _exitCode = code;
-    if (mounted) setState(() {});
+    if (_status != TermStatus.running) return;
+    setState(() {
+      _status = TermStatus.exited;
+      _exitCode = code;
+    });
   }
 
   void _restart() {
-    _focus.removeListener(_reportFocus);
     _outputSub?.cancel();
-    _outputSub = null;
+    _focus.removeListener(_reportFocus);
     _pty?.kill();
-    _pty = null;
     _client?.dispose();
+    _outputSub = null;
+    _pty = null;
     _client = null;
     _exitCode = null;
     _errorMessage = null;
