@@ -66,7 +66,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     cellWidth: _metrics.width,
   );
 
-  final MirrorGrid _grid = MirrorGrid();
+  late final MirrorGrid _grid = MirrorGrid(
+    defaultFg: _config.colors.foreground,
+    defaultBg: _config.colors.background,
+  );
   final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
   Timer? _blinkTimer;
   final FocusNode _focus = FocusNode();

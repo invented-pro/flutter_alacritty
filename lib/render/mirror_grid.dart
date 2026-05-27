@@ -50,6 +50,16 @@ class GridUpdate {
 /// Mutable terminal grid. Applies incremental line deltas in place and notifies
 /// the painter to repaint.
 class MirrorGrid extends ChangeNotifier {
+  /// [defaultFg]/[defaultBg] fill empty/newly-grown cells. They must match the
+  /// engine's blank-cell colors (the configured default fg/bg) so untouched rows
+  /// — which the engine never sends partial damage for — render in the right
+  /// color from the first frame instead of a stale hardcoded default.
+  MirrorGrid({int defaultFg = 0xD8D8D8, int defaultBg = 0x181818})
+      : _defaultFg = defaultFg,
+        _defaultBg = defaultBg;
+
+  final int _defaultFg;
+  final int _defaultBg;
   int _generation = 0;
   int _rows = 0;
   int _columns = 0;
@@ -88,8 +98,8 @@ class MirrorGrid extends ChangeNotifier {
     _rows = rows;
     _columns = columns;
     _codepoints = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, 32));
-    _fg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, 0xD8D8D8));
-    _bg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, 0x181818));
+    _fg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, _defaultFg));
+    _bg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, _defaultBg));
     _flags = List.generate(rows, (_) => Uint16List(columns));
   }
 

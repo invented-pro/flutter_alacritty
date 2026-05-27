@@ -24,6 +24,23 @@ void main() {
     expect(g.codepointAt(0, 2), 'c'.codeUnitAt(0));
   });
 
+  test('initializeEmpty fills cells with the configured default colors', () {
+    // Regression: empty rows the engine never sends partial damage for must
+    // already carry the configured bg/fg, not a hardcoded default — otherwise
+    // untouched rows render stale until a full snapshot (e.g. a click) repaints.
+    final g = MirrorGrid(defaultFg: 0xAABBCC, defaultBg: 0x102030);
+    g.initializeEmpty(2, 3);
+    expect(g.bgAt(0, 0), 0x102030);
+    expect(g.bgAt(1, 2), 0x102030);
+    expect(g.fgAt(0, 0), 0xAABBCC);
+  });
+
+  test('default constructor keeps the v1 fill colors', () {
+    final g = MirrorGrid()..initializeEmpty(1, 1);
+    expect(g.bgAt(0, 0), 0x181818);
+    expect(g.fgAt(0, 0), 0xD8D8D8);
+  });
+
   test('partial update mutates only named lines', () {
     final g = MirrorGrid();
     g.apply(GridUpdate(full: true, rows: 2, columns: 3,
