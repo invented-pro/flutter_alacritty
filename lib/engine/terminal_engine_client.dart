@@ -1,0 +1,59 @@
+import 'dart:typed_data';
+
+import 'package:flutter/scheduler.dart';
+
+import '../render/mirror_grid.dart';
+import 'engine_binding.dart';
+
+/// Coalesces PTY output per frame and feeds it to the engine off the UI thread,
+/// then applies the returned damage to the grid. A single advance is ever in
+/// flight (`_advancing`), giving natural backpressure under heavy output.
+class TerminalEngineClient {
+  TerminalEngineClient({
+    required EngineBinding binding,
+    required MirrorGrid grid,
+    void Function(void Function())? schedule,
+  })  : _binding = binding,
+        _grid = grid,
+        _schedule = schedule ??
+            ((cb) => SchedulerBinding.instance.addPostFrameCallback((_) => cb()));
+
+  final EngineBinding _binding;
+  final MirrorGrid _grid;
+  final void Function(void Function()) _schedule;
+
+  final BytesBuilder _buf = BytesBuilder(copy: false);
+  bool _drainScheduled = false;
+  bool _advancing = false;
+
+  void feed(Uint8List bytes) {
+    _buf.add(bytes);
+    _scheduleDrain();
+  }
+
+  void _scheduleDrain() {
+    if (_drainScheduled || _advancing) return;
+    _drainScheduled = true;
+    _schedule(_drain);
+  }
+
+  Future<void> _drain() async {
+    _drainScheduled = false;
+    if (_buf.isEmpty) return;
+    _advancing = true;
+    final batch = _buf.takeBytes();
+    try {
+      await _binding.advance(batch);
+      final update = await _binding.takeDamage();
+      _grid.apply(update);
+      _binding.pumpEvents(); // route PtyWrite/Title/Bell/Clipboard for this batch
+    } finally {
+      _advancing = false;
+    }
+    if (_buf.isNotEmpty) _scheduleDrain();
+  }
+
+  void resize(int columns, int rows) => _binding.resize(columns, rows);
+
+  void dispose() => _binding.dispose();
+}
