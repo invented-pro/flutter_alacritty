@@ -8,10 +8,15 @@ import '../event_proxy.dart';
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-TerminalEngine engineNew({required int columns, required int rows}) => RustLib
-    .instance
-    .api
-    .crateApiTerminalEngineNew(columns: columns, rows: rows);
+TerminalEngine engineNew({
+  required int columns,
+  required int rows,
+  required EngineConfig config,
+}) => RustLib.instance.api.crateApiTerminalEngineNew(
+  columns: columns,
+  rows: rows,
+  config: config,
+);
 
 Future<void> engineAdvance({
   required TerminalEngine engine,

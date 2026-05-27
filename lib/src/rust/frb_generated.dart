@@ -98,6 +98,7 @@ abstract class RustLibApi extends BaseApi {
   TerminalEngine crateApiTerminalEngineNew({
     required int columns,
     required int rows,
+    required EngineConfig config,
   });
 
   void crateApiTerminalEngineResize({
@@ -275,6 +276,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TerminalEngine crateApiTerminalEngineNew({
     required int columns,
     required int rows,
+    required EngineConfig config,
   }) {
     return handler.executeSync(
       SyncTask(
@@ -282,6 +284,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_u_16(columns, serializer);
           sse_encode_u_16(rows, serializer);
+          sse_encode_box_autoadd_engine_config(config, serializer);
           return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4)!;
         },
         codec: SseCodec(
@@ -290,7 +293,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: null,
         ),
         constMeta: kCrateApiTerminalEngineNewConstMeta,
-        argValues: [columns, rows],
+        argValues: [columns, rows, config],
         apiImpl: this,
       ),
     );
@@ -298,7 +301,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiTerminalEngineNewConstMeta => const TaskConstMeta(
     debugName: "engine_new",
-    argNames: ["columns", "rows"],
+    argNames: ["columns", "rows", "config"],
   );
 
   @override
@@ -720,6 +723,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  EngineConfig dco_decode_box_autoadd_engine_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_engine_config(raw);
+  }
+
+  @protected
   CellData dco_decode_cell_data(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -730,6 +739,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       fg: dco_decode_u_32(arr[1]),
       bg: dco_decode_u_32(arr[2]),
       flags: dco_decode_u_16(arr[3]),
+    );
+  }
+
+  @protected
+  EngineConfig dco_decode_engine_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return EngineConfig(
+      palette: dco_decode_list_prim_u_32_strict(arr[0]),
+      scrollback: dco_decode_u_32(arr[1]),
     );
   }
 
@@ -786,6 +807,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<LineUpdate> dco_decode_list_line_update(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_line_update).toList();
+  }
+
+  @protected
+  Uint32List dco_decode_list_prim_u_32_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as Uint32List;
   }
 
   @protected
@@ -917,6 +944,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  EngineConfig sse_decode_box_autoadd_engine_config(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_engine_config(deserializer));
+  }
+
+  @protected
   CellData sse_decode_cell_data(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_codepoint = sse_decode_u_32(deserializer);
@@ -929,6 +964,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bg: var_bg,
       flags: var_flags,
     );
+  }
+
+  @protected
+  EngineConfig sse_decode_engine_config(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_palette = sse_decode_list_prim_u_32_strict(deserializer);
+    var var_scrollback = sse_decode_u_32(deserializer);
+    return EngineConfig(palette: var_palette, scrollback: var_scrollback);
   }
 
   @protected
@@ -1003,6 +1046,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ans_.add(sse_decode_line_update(deserializer));
     }
     return ans_;
+  }
+
+  @protected
+  Uint32List sse_decode_list_prim_u_32_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getUint32List(len_);
   }
 
   @protected
@@ -1149,12 +1199,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_engine_config(
+    EngineConfig self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_engine_config(self, serializer);
+  }
+
+  @protected
   void sse_encode_cell_data(CellData self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_32(self.codepoint, serializer);
     sse_encode_u_32(self.fg, serializer);
     sse_encode_u_32(self.bg, serializer);
     sse_encode_u_16(self.flags, serializer);
+  }
+
+  @protected
+  void sse_encode_engine_config(EngineConfig self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_prim_u_32_strict(self.palette, serializer);
+    sse_encode_u_32(self.scrollback, serializer);
   }
 
   @protected
@@ -1224,6 +1290,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_line_update(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_list_prim_u_32_strict(
+    Uint32List self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer.putUint32List(self);
   }
 
   @protected

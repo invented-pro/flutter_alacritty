@@ -245,10 +245,14 @@ fn wire__crate__api__terminal__engine_new_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_columns = <u16>::sse_decode(&mut deserializer);
             let api_rows = <u16>::sse_decode(&mut deserializer);
+            let api_config = <crate::engine::EngineConfig>::sse_decode(&mut deserializer);
             deserializer.end();
             transform_result_sse::<_, ()>((move || {
-                let output_ok =
-                    Result::<_, ()>::Ok(crate::api::terminal::engine_new(api_columns, api_rows))?;
+                let output_ok = Result::<_, ()>::Ok(crate::api::terminal::engine_new(
+                    api_columns,
+                    api_rows,
+                    api_config,
+                ))?;
                 Ok(output_ok)
             })())
         },
@@ -885,6 +889,18 @@ impl SseDecode for crate::engine::CellData {
     }
 }
 
+impl SseDecode for crate::engine::EngineConfig {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_palette = <Vec<u32>>::sse_decode(deserializer);
+        let mut var_scrollback = <u32>::sse_decode(deserializer);
+        return crate::engine::EngineConfig {
+            palette: var_palette,
+            scrollback: var_scrollback,
+        };
+    }
+}
+
 impl SseDecode for crate::event_proxy::EngineEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -965,6 +981,18 @@ impl SseDecode for Vec<crate::engine::LineUpdate> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::engine::LineUpdate>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<u32>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -1142,6 +1170,24 @@ impl flutter_rust_bridge::IntoIntoDart<crate::engine::CellData> for crate::engin
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::engine::EngineConfig {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.palette.into_into_dart().into_dart(),
+            self.scrollback.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::engine::EngineConfig {}
+impl flutter_rust_bridge::IntoIntoDart<crate::engine::EngineConfig>
+    for crate::engine::EngineConfig
+{
+    fn into_into_dart(self) -> crate::engine::EngineConfig {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::event_proxy::EngineEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -1257,6 +1303,14 @@ impl SseEncode for crate::engine::CellData {
     }
 }
 
+impl SseEncode for crate::engine::EngineConfig {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<u32>>::sse_encode(self.palette, serializer);
+        <u32>::sse_encode(self.scrollback, serializer);
+    }
+}
+
 impl SseEncode for crate::event_proxy::EngineEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1327,6 +1381,16 @@ impl SseEncode for Vec<crate::engine::LineUpdate> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::engine::LineUpdate>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <u32>::sse_encode(item, serializer);
         }
     }
 }

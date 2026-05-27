@@ -1,12 +1,12 @@
-pub use crate::engine::{CellData, LineUpdate, RenderUpdate, TerminalEngine};
+pub use crate::engine::{CellData, EngineConfig, LineUpdate, RenderUpdate, TerminalEngine};
 pub use crate::event_proxy::EngineEvent;
 
 use flutter_rust_bridge::frb;
 use std::panic::AssertUnwindSafe;
 
 #[frb(sync)]
-pub fn engine_new(columns: u16, rows: u16) -> TerminalEngine {
-    TerminalEngine::new(columns, rows)
+pub fn engine_new(columns: u16, rows: u16, config: EngineConfig) -> TerminalEngine {
+    TerminalEngine::new(columns, rows, config)
 }
 
 pub async fn engine_advance(engine: &mut TerminalEngine, bytes: Vec<u8>) {

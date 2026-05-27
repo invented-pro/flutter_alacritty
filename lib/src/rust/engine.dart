@@ -38,6 +38,27 @@ class CellData {
           flags == other.flags;
 }
 
+/// Color configuration passed from Dart at engine creation.
+/// `palette` is length 18: [0..15] = ANSI colors, [16] = default fg, [17] = default bg
+/// (each packed 0x00RRGGBB). `scrollback` = max history lines.
+class EngineConfig {
+  final Uint32List palette;
+  final int scrollback;
+
+  const EngineConfig({required this.palette, required this.scrollback});
+
+  @override
+  int get hashCode => palette.hashCode ^ scrollback.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EngineConfig &&
+          runtimeType == other.runtimeType &&
+          palette == other.palette &&
+          scrollback == other.scrollback;
+}
+
 class LineUpdate {
   final int line;
   final List<CellData> cells;

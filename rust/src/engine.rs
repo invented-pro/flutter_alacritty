@@ -43,6 +43,31 @@ impl RenderUpdate {
     }
 }
 
+/// Color configuration passed from Dart at engine creation.
+/// `palette` is length 18: [0..15] = ANSI colors, [16] = default fg, [17] = default bg
+/// (each packed 0x00RRGGBB). `scrollback` = max history lines.
+#[derive(Clone, Debug)]
+pub struct EngineConfig {
+    pub palette: Vec<u32>,
+    pub scrollback: u32,
+}
+
+impl EngineConfig {
+    /// The canonical v1 palette (ANSI 0-15, then default fg, default bg).
+    pub fn default_palette() -> [u32; 18] {
+        [
+            0x0000_0000, 0x00CC_0000, 0x004E_9A06, 0x00C4_A000, 0x0034_65A4, 0x0075_507B,
+            0x0006_989A, 0x00D3_D7CF, 0x0055_5753, 0x00EF_2929, 0x008A_E234, 0x00FC_E94F,
+            0x0072_9FCF, 0x00AD_7FA8, 0x0034_E2E2, 0x00EE_EEEC,
+            DEFAULT_FG, DEFAULT_BG,
+        ]
+    }
+
+    pub fn defaults() -> EngineConfig {
+        EngineConfig { palette: Self::default_palette().to_vec(), scrollback: 10000 }
+    }
+}
+
 // Bit layout for CellData.flags (a subset for the tracer bullet).
 pub const FLAG_BOLD: u16 = 1 << 0;
 pub const FLAG_ITALIC: u16 = 1 << 1;
@@ -59,86 +84,6 @@ const DEFAULT_BG: u32 = 0x0018_1818;
 
 fn pack(r: u8, g: u8, b: u8) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
-}
-
-/// Standard 16-color ANSI palette (xterm-ish), index 0..15.
-fn ansi16(i: u8) -> u32 {
-    const T: [u32; 16] = [
-        0x000000, 0xCC0000, 0x4E9A06, 0xC4A000, 0x3465A4, 0x75507B, 0x06989A, 0xD3D7CF,
-        0x555753, 0xEF2929, 0x8AE234, 0xFCE94F, 0x729FCF, 0xAD7FA8, 0x34E2E2, 0xEEEEEC,
-    ];
-    T[i as usize]
-}
-
-/// Resolve a 256-color palette index to packed RGB.
-fn xterm256(i: u8) -> u32 {
-    match i {
-        0..=15 => ansi16(i),
-        16..=231 => {
-            let i = i - 16;
-            let r = i / 36;
-            let g = (i % 36) / 6;
-            let b = i % 6;
-            let step = |v: u8| if v == 0 { 0u8 } else { 55 + v * 40 };
-            pack(step(r), step(g), step(b))
-        }
-        232..=255 => {
-            let v = 8 + (i - 232) * 10;
-            pack(v, v, v)
-        }
-    }
-}
-
-fn resolve_named(c: NamedColor) -> u32 {
-    use NamedColor::*;
-    match c {
-        Foreground | BrightForeground => DEFAULT_FG,
-        Background => DEFAULT_BG,
-        Black => ansi16(0),
-        Red => ansi16(1),
-        Green => ansi16(2),
-        Yellow => ansi16(3),
-        Blue => ansi16(4),
-        Magenta => ansi16(5),
-        Cyan => ansi16(6),
-        White => ansi16(7),
-        BrightBlack => ansi16(8),
-        BrightRed => ansi16(9),
-        BrightGreen => ansi16(10),
-        BrightYellow => ansi16(11),
-        BrightBlue => ansi16(12),
-        BrightMagenta => ansi16(13),
-        BrightCyan => ansi16(14),
-        BrightWhite => ansi16(15),
-        Cursor => DEFAULT_FG,
-        // Dim variants: fall back to their normal counterparts for the spike.
-        DimBlack => ansi16(0),
-        DimRed => ansi16(1),
-        DimGreen => ansi16(2),
-        DimYellow => ansi16(3),
-        DimBlue => ansi16(4),
-        DimMagenta => ansi16(5),
-        DimCyan => ansi16(6),
-        DimWhite => ansi16(7),
-        DimForeground => DEFAULT_FG,
-    }
-}
-
-fn resolve_color(c: Color, is_fg: bool) -> u32 {
-    match c {
-        Color::Named(n) => resolve_named(n),
-        Color::Spec(Rgb { r, g, b }) => pack(r, g, b),
-        Color::Indexed(i) => xterm256(i),
-        // Any other/future variant: fall back to the default.
-        #[allow(unreachable_patterns)]
-        _ => {
-            if is_fg {
-                DEFAULT_FG
-            } else {
-                DEFAULT_BG
-            }
-        }
-    }
 }
 
 fn map_flags(f: Flags) -> u16 {
@@ -186,35 +131,37 @@ fn sel_type(kind: u8) -> SelectionType {
     }
 }
 
-fn cell_data(cell: &Cell) -> CellData {
-    CellData {
-        codepoint: cell.c as u32,
-        fg: resolve_color(cell.fg, true),
-        bg: resolve_color(cell.bg, false),
-        flags: map_flags(cell.flags),
-    }
-}
-
 pub struct TerminalEngine {
     term: Term<EventProxy>,
     parser: Processor,
     events: EventQueue,
+    palette: [u32; 18],
 }
 
 impl TerminalEngine {
-    pub fn new(columns: u16, rows: u16) -> TerminalEngine {
+    pub fn new(columns: u16, rows: u16, config: EngineConfig) -> TerminalEngine {
         let size = alacritty_terminal::term::test::TermSize::new(
             columns as usize,
             rows as usize,
         );
+        // Length-guard: Dart always sends 18; fall back defensively if not.
+        let palette: [u32; 18] = config
+            .palette
+            .try_into()
+            .unwrap_or_else(|_| EngineConfig::default_palette());
         let events: EventQueue = Arc::new(Mutex::new(Vec::new()));
-        let mut term = Term::new(Config::default(), &size, EventProxy::new(events.clone()));
+        let term_config = Config {
+            scrolling_history: config.scrollback as usize,
+            ..Default::default()
+        };
+        let mut term = Term::new(term_config, &size, EventProxy::new(events.clone()));
         // Term boots with `damage.full`; clear so the first `take_damage` after input is partial.
         term.reset_damage();
         TerminalEngine {
             term,
             parser: Processor::new(),
             events,
+            palette,
         }
     }
 
@@ -274,7 +221,90 @@ impl TerminalEngine {
         let grid = self.term.grid();
         let cols = grid.columns();
         let g_line = &grid[Line(row as i32)];
-        (0..cols).map(|col| cell_data(&g_line[Column(col)])).collect()
+        (0..cols)
+            .map(|col| self.cell_data(&g_line[Column(col)]))
+            .collect()
+    }
+
+    fn ansi16(&self, i: u8) -> u32 {
+        self.palette[i as usize]
+    }
+
+    fn xterm256(&self, i: u8) -> u32 {
+        match i {
+            0..=15 => self.ansi16(i),
+            16..=231 => {
+                let i = i - 16;
+                let r = i / 36;
+                let g = (i % 36) / 6;
+                let b = i % 6;
+                let step = |v: u8| if v == 0 { 0u8 } else { 55 + v * 40 };
+                pack(step(r), step(g), step(b))
+            }
+            232..=255 => {
+                let v = 8 + (i - 232) * 10;
+                pack(v, v, v)
+            }
+        }
+    }
+
+    fn resolve_named(&self, c: NamedColor) -> u32 {
+        use NamedColor::*;
+        match c {
+            Foreground | BrightForeground => self.palette[16],
+            Background => self.palette[17],
+            Black => self.ansi16(0),
+            Red => self.ansi16(1),
+            Green => self.ansi16(2),
+            Yellow => self.ansi16(3),
+            Blue => self.ansi16(4),
+            Magenta => self.ansi16(5),
+            Cyan => self.ansi16(6),
+            White => self.ansi16(7),
+            BrightBlack => self.ansi16(8),
+            BrightRed => self.ansi16(9),
+            BrightGreen => self.ansi16(10),
+            BrightYellow => self.ansi16(11),
+            BrightBlue => self.ansi16(12),
+            BrightMagenta => self.ansi16(13),
+            BrightCyan => self.ansi16(14),
+            BrightWhite => self.ansi16(15),
+            Cursor => self.palette[16],
+            DimBlack => self.ansi16(0),
+            DimRed => self.ansi16(1),
+            DimGreen => self.ansi16(2),
+            DimYellow => self.ansi16(3),
+            DimBlue => self.ansi16(4),
+            DimMagenta => self.ansi16(5),
+            DimCyan => self.ansi16(6),
+            DimWhite => self.ansi16(7),
+            DimForeground => self.palette[16],
+        }
+    }
+
+    fn resolve_color(&self, c: Color, is_fg: bool) -> u32 {
+        match c {
+            Color::Named(n) => self.resolve_named(n),
+            Color::Spec(Rgb { r, g, b }) => pack(r, g, b),
+            Color::Indexed(i) => self.xterm256(i),
+            #[allow(unreachable_patterns)]
+            _ => {
+                if is_fg {
+                    self.palette[16]
+                } else {
+                    self.palette[17]
+                }
+            }
+        }
+    }
+
+    fn cell_data(&self, cell: &Cell) -> CellData {
+        CellData {
+            codepoint: cell.c as u32,
+            fg: self.resolve_color(cell.fg, true),
+            bg: self.resolve_color(cell.bg, false),
+            flags: map_flags(cell.flags),
+        }
     }
 
     fn cursor_fields(&self) -> (u32, u32, bool, u8, bool) {
@@ -302,8 +332,8 @@ impl TerminalEngine {
         let display_offset = self.term.grid().display_offset();
         let blank = CellData {
             codepoint: ' ' as u32,
-            fg: DEFAULT_FG,
-            bg: DEFAULT_BG,
+            fg: self.palette[16],
+            bg: self.palette[17],
             flags: 0,
         };
         let mut lines: Vec<LineUpdate> = (0..rows)
@@ -320,7 +350,7 @@ impl TerminalEngine {
         for indexed in self.term.grid().display_iter() {
             if let Some(vp) = point_to_viewport(display_offset, indexed.point) {
                 if vp.line < rows && vp.column.0 < cols {
-                    let mut cd = cell_data(indexed.cell);
+                    let mut cd = self.cell_data(indexed.cell);
                     if let Some(r) = &sel {
                         if point_in_range(indexed.point, r) {
                             cd.flags |= FLAG_SELECTED;
@@ -399,7 +429,7 @@ mod tests {
     use super::*;
 
     fn engine(cols: u16, rows: u16) -> TerminalEngine {
-        TerminalEngine::new(cols, rows)
+        TerminalEngine::new(cols, rows, EngineConfig::defaults())
     }
 
     fn line<'a>(u: &'a RenderUpdate, row: u32) -> &'a LineUpdate {
@@ -602,5 +632,37 @@ mod tests {
             })
             .expect("expected a PtyWrite cursor report");
         assert_eq!(report, b"\x1b[1;1R");
+    }
+
+    #[test]
+    fn palette_injection_overrides_ansi_colors() {
+        let mut pal = EngineConfig::default_palette();
+        pal[1] = 0x0011_2233;
+        let cfg = EngineConfig { palette: pal.to_vec(), scrollback: 1000 };
+        let mut e = TerminalEngine::new(20, 5, cfg);
+        e.advance(b"\x1b[31mR".to_vec());
+        let u = e.full_snapshot();
+        assert_eq!(u.lines[0].cells[0].fg & 0x00FF_FFFF, 0x0011_2233);
+    }
+
+    #[test]
+    fn default_palette_matches_v1_table() {
+        let p = EngineConfig::default_palette();
+        assert_eq!(p[0], 0x0000_0000);
+        assert_eq!(p[1], 0x00CC_0000);
+        assert_eq!(p[15], 0x00EE_EEEC);
+        assert_eq!(p[16], 0x00D8_D8D8);
+        assert_eq!(p[17], 0x0018_1818);
+    }
+
+    #[test]
+    fn custom_scrollback_is_honored() {
+        let mut cfg = EngineConfig::defaults();
+        cfg.scrollback = 50;
+        let mut e = TerminalEngine::new(10, 3, cfg);
+        for _ in 0..200 { e.advance(b"x\r\n".to_vec()); }
+        e.scroll_lines(1000);
+        let u = e.full_snapshot();
+        assert!(u.display_offset <= 50, "offset {} exceeds history 50", u.display_offset);
     }
 }
