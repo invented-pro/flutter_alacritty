@@ -52,6 +52,128 @@ double _w(int weight, double lineWidth) => weight == 2 ? lineWidth * 1.8 : lineW
 List<BoxOp> boxOps(int cp, Rect cell, double lineWidth) {
   final arms = _arms[cp];
   if (arms != null) return _armOps(arms, cell, lineWidth);
+  if (cp >= 0x256D && cp <= 0x2570) return _roundedOps(cp, cell, lineWidth);
+  if (cp >= 0x2571 && cp <= 0x2573) return _diagonalOps(cp, cell, lineWidth);
+  if (cp >= 0x2580 && cp <= 0x259F) return _blockOps(cp, cell);
+  return const [];
+}
+
+List<BoxOp> _roundedOps(int cp, Rect cell, double lineWidth) {
+  final cx = cell.center.dx, cy = cell.center.dy;
+  final r = (cell.width < cell.height ? cell.width : cell.height) / 2;
+  switch (cp) {
+    case 0x256D: // ╭
+      return [
+        ArcOp(
+          Rect.fromCircle(center: Offset(cx + r, cy + r), radius: r),
+          3.1415926,
+          1.5707963,
+          lineWidth,
+        ),
+      ];
+    case 0x256E: // ╮
+      return [
+        ArcOp(
+          Rect.fromCircle(center: Offset(cx - r, cy + r), radius: r),
+          4.7123889,
+          1.5707963,
+          lineWidth,
+        ),
+      ];
+    case 0x256F: // ╯
+      return [
+        ArcOp(
+          Rect.fromCircle(center: Offset(cx - r, cy - r), radius: r),
+          0,
+          1.5707963,
+          lineWidth,
+        ),
+      ];
+    case 0x2570: // ╰
+      return [
+        ArcOp(
+          Rect.fromCircle(center: Offset(cx + r, cy - r), radius: r),
+          1.5707963,
+          1.5707963,
+          lineWidth,
+        ),
+      ];
+  }
+  return const [];
+}
+
+List<BoxOp> _diagonalOps(int cp, Rect cell, double lineWidth) {
+  final ops = <BoxOp>[];
+  if (cp == 0x2571 || cp == 0x2573) {
+    ops.add(LineOp(cell.bottomLeft, cell.topRight, lineWidth)); // ╱
+  }
+  if (cp == 0x2572 || cp == 0x2573) {
+    ops.add(LineOp(cell.topLeft, cell.bottomRight, lineWidth)); // ╲
+  }
+  return ops;
+}
+
+List<BoxOp> _blockOps(int cp, Rect cell) {
+  final l = cell.left, t = cell.top, r = cell.right, b = cell.bottom;
+  final cx = cell.center.dx, cy = cell.center.dy;
+  Rect q(double l0, double t0, double r0, double b0) =>
+      Rect.fromLTRB(l0, t0, r0, b0);
+  switch (cp) {
+    case 0x2588:
+      return [RectOp(cell, 1.0)]; // █
+    case 0x2580:
+      return [RectOp(q(l, t, r, cy), 1.0)]; // ▀ upper half
+    case 0x2584:
+      return [RectOp(q(l, cy, r, b), 1.0)]; // ▄ lower half
+    case 0x258C:
+      return [RectOp(q(l, t, cx, b), 1.0)]; // ▌ left half
+    case 0x2590:
+      return [RectOp(q(cx, t, r, b), 1.0)]; // ▐ right half
+    case 0x2591:
+      return [RectOp(cell, 0.25)]; // ░
+    case 0x2592:
+      return [RectOp(cell, 0.5)]; // ▒
+    case 0x2593:
+      return [RectOp(cell, 0.75)]; // ▓
+    case 0x2596:
+      return [RectOp(q(l, cy, cx, b), 1.0)]; // ▖ BL
+    case 0x2597:
+      return [RectOp(q(cx, cy, r, b), 1.0)]; // ▗ BR
+    case 0x2598:
+      return [RectOp(q(l, t, cx, cy), 1.0)]; // ▘ TL
+    case 0x259D:
+      return [RectOp(q(cx, t, r, cy), 1.0)]; // ▝ TR
+    case 0x259A:
+      return [
+        RectOp(q(l, t, cx, cy), 1.0),
+        RectOp(q(cx, cy, r, b), 1.0),
+      ]; // ▚ TL+BR
+    case 0x259E:
+      return [
+        RectOp(q(cx, t, r, cy), 1.0),
+        RectOp(q(l, cy, cx, b), 1.0),
+      ]; // ▞ TR+BL
+    case 0x2599:
+      return [
+        RectOp(q(l, t, cx, b), 1.0),
+        RectOp(q(cx, cy, r, b), 1.0),
+      ]; // ▙
+    case 0x259B:
+      return [
+        RectOp(q(l, t, r, cy), 1.0),
+        RectOp(q(l, cy, cx, b), 1.0),
+      ]; // ▛
+    case 0x259C:
+      return [
+        RectOp(q(l, t, r, cy), 1.0),
+        RectOp(q(cx, cy, r, b), 1.0),
+      ]; // ▜
+    case 0x259F:
+      return [
+        RectOp(q(cx, t, r, b), 1.0),
+        RectOp(q(l, cy, cx, b), 1.0),
+      ]; // ▟
+  }
   return const [];
 }
 

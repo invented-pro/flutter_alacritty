@@ -45,4 +45,38 @@ void main() {
     final ops = boxOps(0x2550, cell, lw); // ═
     expect(ops.whereType<LineOp>().length, 2);
   });
+
+  test('rounded corner emits an arc', () {
+    expect(boxOps(0x256D, cell, lw).whereType<ArcOp>().length, 1); // ╭
+  });
+
+  test('diagonal cross emits two lines', () {
+    expect(boxOps(0x2573, cell, lw).whereType<LineOp>().length, 2); // ╳
+  });
+
+  test('full block is a full-cell opaque rect', () {
+    final r = boxOps(0x2588, cell, lw).whereType<RectOp>().single; // █
+    expect(r.rect, cell);
+    expect(r.alpha, 1.0);
+  });
+
+  test('upper half block fills the top half', () {
+    final r = boxOps(0x2580, cell, lw).whereType<RectOp>().single; // ▀
+    expect(r.rect.height, cell.height / 2);
+    expect(r.rect.top, cell.top);
+  });
+
+  test('medium shade is a full-cell rect at 0.5 alpha', () {
+    final r = boxOps(0x2592, cell, lw).whereType<RectOp>().single; // ▒
+    expect(r.rect, cell);
+    expect(r.alpha, closeTo(0.5, 1e-9));
+  });
+
+  test('lower-right quadrant fills the bottom-right rect', () {
+    final r = boxOps(0x2597, cell, lw).whereType<RectOp>().single; // ▗
+    expect(
+      r.rect,
+      Rect.fromLTRB(cell.center.dx, cell.center.dy, cell.right, cell.bottom),
+    );
+  });
 }
