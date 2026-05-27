@@ -219,3 +219,29 @@ List<BoxOp> _armOps(List<int> arms, Rect cell, double lineWidth) {
   arm(arms[3], Offset(cell.right, cy), false); // right
   return ops;
 }
+
+/// Renders [cp]'s ops into [cell] with [fg]. No-op (returns false) if [cp] has
+/// no programmatic ops, so the caller can fall back to the font glyph.
+bool paintBoxGlyph(Canvas canvas, Rect cell, int cp, Color fg, double lineWidth) {
+  final ops = boxOps(cp, cell, lineWidth);
+  if (ops.isEmpty) return false;
+  final stroke = Paint()
+    ..color = fg
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt;
+  final fill = Paint()..style = PaintingStyle.fill;
+  for (final op in ops) {
+    switch (op) {
+      case LineOp(:final a, :final b, :final width):
+        stroke.strokeWidth = width;
+        canvas.drawLine(a, b, stroke);
+      case RectOp(:final rect, :final alpha):
+        fill.color = fg.withValues(alpha: fg.a * alpha);
+        canvas.drawRect(rect, fill);
+      case ArcOp(:final bounds, :final startAngle, :final sweepAngle, :final width):
+        stroke.strokeWidth = width;
+        canvas.drawArc(bounds, startAngle, sweepAngle, false, stroke);
+    }
+  }
+  return true;
+}

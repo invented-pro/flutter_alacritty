@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'box_drawing.dart';
 import 'cell_flags.dart';
 import 'glyph_cache.dart';
 import 'mirror_grid.dart';
@@ -46,7 +47,8 @@ class TerminalPainter extends CustomPainter {
       }
     }
 
-    // Pass 2: glyphs.
+    // Pass 2: glyphs / geometry.
+    final lineWidth = (cellHeight * 0.08).clamp(1.0, 4.0);
     var needsWarmupFrame = false;
     for (var row = 0; row < rows; row++) {
       final y = row * cellHeight;
@@ -55,6 +57,11 @@ class TerminalPainter extends CustomPainter {
         if (flags & kFlagWideSpacer != 0) continue; // covered by the wide glyph at col-1
         final cp = grid.codepointAt(row, col);
         if (cp == 32 || cp == 0) continue;
+        final fg = Color(0xFF000000 | grid.fgAt(row, col));
+        final cellRect = Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight);
+        if (isBoxDrawing(cp) && paintBoxGlyph(canvas, cellRect, cp, fg, lineWidth)) {
+          continue;
+        }
         final paragraph =
             glyphs.tryGet(cp, grid.fgAt(row, col), wide: flags & kFlagWide != 0);
         if (paragraph != null) {
