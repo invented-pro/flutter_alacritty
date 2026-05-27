@@ -77,4 +77,23 @@ void main() {
     expect(glyphs.calls.contains((0x4E2D, true)), isTrue); // 中
     expect(glyphs.calls.any((c) => c.$1 == 'X'.codeUnitAt(0)), isFalse);
   });
+
+  testWidgets('selected cell gets a highlight overlay', (tester) async {
+    final grid = MirrorGrid();
+    grid.apply(GridUpdate(
+      full: true, rows: 1, columns: 2,
+      lines: [
+        LineCells(
+          line: 0,
+          codepoints: Int32List.fromList('ab'.codeUnits),
+          fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8]),
+          bg: Int32List.fromList([0x181818, 0x181818]),
+          flags: Uint16List.fromList([kFlagSelected, 0]),
+        ),
+      ],
+      cursorRow: 0, cursorCol: 0, cursorVisible: false,
+    ));
+    expect(isSelected(grid.flagsAt(0, 0)), isTrue);
+    expect(isSelected(grid.flagsAt(0, 1)), isFalse);
+  });
 }

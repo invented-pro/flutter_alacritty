@@ -59,3 +59,35 @@ Future<void> engineScrollLines({
 
 Future<void> engineScrollToBottom({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineScrollToBottom(engine: engine);
+
+void engineSelectionStart({
+  required TerminalEngine engine,
+  required int displayRow,
+  required int col,
+  required bool rightHalf,
+  required int kind,
+}) => RustLib.instance.api.crateApiTerminalEngineSelectionStart(
+  engine: engine,
+  displayRow: displayRow,
+  col: col,
+  rightHalf: rightHalf,
+  kind: kind,
+);
+
+void engineSelectionUpdate({
+  required TerminalEngine engine,
+  required int displayRow,
+  required int col,
+  required bool rightHalf,
+}) => RustLib.instance.api.crateApiTerminalEngineSelectionUpdate(
+  engine: engine,
+  displayRow: displayRow,
+  col: col,
+  rightHalf: rightHalf,
+);
+
+void engineSelectionClear({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineSelectionClear(engine: engine);
+
+String? engineSelectionText({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineSelectionText(engine: engine);

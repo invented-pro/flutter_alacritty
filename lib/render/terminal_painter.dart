@@ -82,6 +82,12 @@ class TerminalPainter extends CustomPainter {
         );
         bgPaint.color = Color(0xFF000000 | ec.bg);
         canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
+        if (isSelected(grid.flagsAt(row, col))) {
+          canvas.drawRect(
+            Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight),
+            Paint()..color = const Color(0x553A6EA5),
+          );
+        }
       }
     }
 

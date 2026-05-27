@@ -68,3 +68,34 @@ pub async fn engine_scroll_lines(engine: &mut TerminalEngine, delta: i32) {
 pub async fn engine_scroll_to_bottom(engine: &mut TerminalEngine) {
     engine.scroll_to_bottom();
 }
+
+#[frb(sync)]
+pub fn engine_selection_start(
+    engine: &mut TerminalEngine,
+    display_row: i32,
+    col: u16,
+    right_half: bool,
+    kind: u8,
+) {
+    engine.selection_start(display_row, col, right_half, kind);
+}
+
+#[frb(sync)]
+pub fn engine_selection_update(
+    engine: &mut TerminalEngine,
+    display_row: i32,
+    col: u16,
+    right_half: bool,
+) {
+    engine.selection_update(display_row, col, right_half);
+}
+
+#[frb(sync)]
+pub fn engine_selection_clear(engine: &mut TerminalEngine) {
+    engine.selection_clear();
+}
+
+#[frb(sync)]
+pub fn engine_selection_text(engine: &TerminalEngine) -> Option<String> {
+    engine.selection_text()
+}

@@ -7,3 +7,6 @@ const int kFlagWide = 1 << 4;
 const int kFlagWideSpacer = 1 << 5;
 const int kFlagDim = 1 << 6;
 const int kFlagStrikeout = 1 << 7;
+const int kFlagSelected = 1 << 8;
+
+bool isSelected(int flags) => flags & kFlagSelected != 0;

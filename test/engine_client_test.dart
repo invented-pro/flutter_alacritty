@@ -47,6 +47,14 @@ class _FakeBinding implements EngineBinding {
   @override
   Future<void> scrollToBottom() async {}
   @override
+  void selectionStart(int displayRow, int col, bool rightHalf, int kind) {}
+  @override
+  void selectionUpdate(int displayRow, int col, bool rightHalf) {}
+  @override
+  void selectionClear() {}
+  @override
+  String? selectionText() => null;
+  @override
   void dispose() {}
 }
 
