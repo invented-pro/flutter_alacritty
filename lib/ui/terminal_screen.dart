@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../engine/engine_binding.dart';
@@ -55,6 +56,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
   int _cols = 0, _rows = 0;
   bool _lastFocused = false;
   int _pressedButton = 0; // last button pressed, for SGR release reporting
+  int _clickCount = 0;
+  DateTime _lastClick = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _selecting = false;
+  // ignore: unused_field
+  String _primary = '';
 
   // Repaint is driven by CustomPaint(repaint: _grid): MirrorGrid.apply() notifies,
   // RenderCustomPaint marks needs-paint, and the client requests a frame when it
@@ -107,6 +113,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _paste();
       return KeyEventResult.handled;
     }
+    if (hw.isControlPressed &&
+        hw.isShiftPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyC) {
+      final text = _client?.binding.selectionText();
+      if (text != null && text.isNotEmpty) {
+        Clipboard.setData(ClipboardData(text: text));
+      }
+      return KeyEventResult.handled;
+    }
     final bytes = encodeKey(
       event.logicalKey,
       event.character,
@@ -118,6 +133,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
     );
     if (bytes == null) return KeyEventResult.ignored;
     _client?.scrollToBottom();
+    _client?.binding.selectionClear();
+    _refreshSelection();
     _pty?.write(bytes);
     return KeyEventResult.handled;
   }
@@ -138,6 +155,19 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _lastFocused = _focus.hasFocus;
     _pty!.write(Uint8List.fromList(
         _focus.hasFocus ? [0x1b, 0x5b, 0x49] : [0x1b, 0x5b, 0x4f])); // ESC[I / ESC[O
+  }
+
+  (int, int, bool) _cellAt(Offset local) {
+    final col = (local.dx / _metrics.width).floor().clamp(0, _cols - 1);
+    final row = (local.dy / _metrics.height).floor().clamp(0, _rows - 1);
+    final rightHalf = (local.dx / _metrics.width) - col > 0.5;
+    return (row, col, rightHalf);
+  }
+
+  Future<void> _refreshSelection() async {
+    if (_client == null) return;
+    _grid.apply(await _client!.binding.takeDamage());
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   void _reportMouse(Offset local, int button, MouseAction action) {
@@ -188,10 +218,32 @@ class _TerminalScreenState extends State<TerminalScreen> {
             child: Listener(
               onPointerDown: (e) {
                 _focus.requestFocus();
+                final localSelect =
+                    !anyMouse(_grid.modeFlags) || HardwareKeyboard.instance.isShiftPressed;
+                if (localSelect &&
+                    _client != null &&
+                    e.buttons & kPrimaryButton != 0) {
+                  final now = DateTime.now();
+                  _clickCount = (now.difference(_lastClick).inMilliseconds < 300)
+                      ? (_clickCount % 3) + 1
+                      : 1;
+                  _lastClick = now;
+                  final (r, c, rh) = _cellAt(e.localPosition);
+                  _client!.binding.selectionStart(r, c, rh, _clickCount - 1);
+                  _selecting = true;
+                  _refreshSelection();
+                  return;
+                }
                 _pressedButton = _btn(e.buttons);
                 _reportMouse(e.localPosition, _pressedButton, MouseAction.down);
               },
               onPointerMove: (e) {
+                if (_selecting && _client != null) {
+                  final (r, c, rh) = _cellAt(e.localPosition);
+                  _client!.binding.selectionUpdate(r, c, rh);
+                  _refreshSelection();
+                  return;
+                }
                 // DRAG (1002): report move while a button is held. Bare hover is
                 // reported as "no button" (code 3) only when MOTION (1003) is set.
                 if (e.buttons == 0) {
@@ -201,8 +253,14 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   _reportMouse(e.localPosition, _btn(e.buttons), MouseAction.move);
                 }
               },
-              onPointerUp: (e) =>
-                  _reportMouse(e.localPosition, _pressedButton, MouseAction.up),
+              onPointerUp: (e) {
+                if (_selecting && _client != null) {
+                  _selecting = false;
+                  _primary = _client!.binding.selectionText() ?? '';
+                  return;
+                }
+                _reportMouse(e.localPosition, _pressedButton, MouseAction.up);
+              },
               onPointerSignal: (e) {
                 if (e is! PointerScrollEvent) return;
                 final up = e.scrollDelta.dy < 0;

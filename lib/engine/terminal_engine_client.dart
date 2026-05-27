@@ -26,6 +26,7 @@ class TerminalEngineClient {
             });
 
   final EngineBinding _binding;
+  EngineBinding get binding => _binding;
   final MirrorGrid _grid;
   final void Function(void Function()) _schedule;
 
