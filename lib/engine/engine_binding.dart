@@ -89,6 +89,7 @@ class FrbEngineBinding implements EngineBinding {
         cursorVisible: u.cursorVisible,
         cursorShape: u.cursorShape,
         cursorBlinking: u.cursorBlinking,
+        modeFlags: u.modeFlags,
         lines: u.lines.map(_lineCells).toList(),
       );
 

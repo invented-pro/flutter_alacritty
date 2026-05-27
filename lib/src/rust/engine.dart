@@ -64,6 +64,7 @@ class RenderUpdate {
   final bool cursorVisible;
   final int cursorShape;
   final bool cursorBlinking;
+  final int modeFlags;
 
   const RenderUpdate({
     required this.lines,
@@ -73,6 +74,7 @@ class RenderUpdate {
     required this.cursorVisible,
     required this.cursorShape,
     required this.cursorBlinking,
+    required this.modeFlags,
   });
 
   @override
@@ -83,7 +85,8 @@ class RenderUpdate {
       cursorCol.hashCode ^
       cursorVisible.hashCode ^
       cursorShape.hashCode ^
-      cursorBlinking.hashCode;
+      cursorBlinking.hashCode ^
+      modeFlags.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -96,5 +99,6 @@ class RenderUpdate {
           cursorCol == other.cursorCol &&
           cursorVisible == other.cursorVisible &&
           cursorShape == other.cursorShape &&
-          cursorBlinking == other.cursorBlinking;
+          cursorBlinking == other.cursorBlinking &&
+          modeFlags == other.modeFlags;
 }

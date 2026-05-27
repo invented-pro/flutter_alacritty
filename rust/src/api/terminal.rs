@@ -27,6 +27,7 @@ pub async fn engine_take_damage(engine: &mut TerminalEngine) -> RenderUpdate {
             cursor_visible: false,
             cursor_shape: 0,
             cursor_blinking: false,
+            mode_flags: 0,
         }
     })
 }

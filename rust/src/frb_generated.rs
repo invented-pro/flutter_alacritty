@@ -643,6 +643,7 @@ impl SseDecode for crate::engine::RenderUpdate {
         let mut var_cursorVisible = <bool>::sse_decode(deserializer);
         let mut var_cursorShape = <u8>::sse_decode(deserializer);
         let mut var_cursorBlinking = <bool>::sse_decode(deserializer);
+        let mut var_modeFlags = <u32>::sse_decode(deserializer);
         return crate::engine::RenderUpdate {
             lines: var_lines,
             full: var_full,
@@ -651,6 +652,7 @@ impl SseDecode for crate::engine::RenderUpdate {
             cursor_visible: var_cursorVisible,
             cursor_shape: var_cursorShape,
             cursor_blinking: var_cursorBlinking,
+            mode_flags: var_modeFlags,
         };
     }
 }
@@ -828,6 +830,7 @@ impl flutter_rust_bridge::IntoDart for crate::engine::RenderUpdate {
             self.cursor_visible.into_into_dart().into_dart(),
             self.cursor_shape.into_into_dart().into_dart(),
             self.cursor_blinking.into_into_dart().into_dart(),
+            self.mode_flags.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -970,6 +973,7 @@ impl SseEncode for crate::engine::RenderUpdate {
         <bool>::sse_encode(self.cursor_visible, serializer);
         <u8>::sse_encode(self.cursor_shape, serializer);
         <bool>::sse_encode(self.cursor_blinking, serializer);
+        <u32>::sse_encode(self.mode_flags, serializer);
     }
 }
 

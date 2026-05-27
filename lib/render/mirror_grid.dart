@@ -31,6 +31,7 @@ class GridUpdate {
     required this.cursorVisible,
     this.cursorShape = 0,
     this.cursorBlinking = false,
+    this.modeFlags = 0,
   });
   final bool full;
   final int rows;
@@ -41,6 +42,7 @@ class GridUpdate {
   final bool cursorVisible;
   final int cursorShape;
   final bool cursorBlinking;
+  final int modeFlags;
 }
 
 /// Mutable terminal grid. Applies incremental line deltas in place and notifies
@@ -58,6 +60,7 @@ class MirrorGrid extends ChangeNotifier {
   bool _cursorVisible = false;
   int _cursorShape = 0;
   bool _cursorBlinking = false;
+  int _modeFlags = 0;
 
   /// Bumps on every [apply] / [initializeEmpty]; used by [TerminalPainter.shouldRepaint].
   int get generation => _generation;
@@ -69,6 +72,7 @@ class MirrorGrid extends ChangeNotifier {
   bool get cursorVisible => _cursorVisible;
   int get cursorShape => _cursorShape;
   bool get cursorBlinking => _cursorBlinking;
+  int get modeFlags => _modeFlags;
 
   int codepointAt(int row, int col) => _codepoints[row][col];
   int fgAt(int row, int col) => _fg[row][col];
@@ -117,6 +121,7 @@ class MirrorGrid extends ChangeNotifier {
     _cursorVisible = u.cursorVisible;
     _cursorShape = u.cursorShape;
     _cursorBlinking = u.cursorBlinking;
+    _modeFlags = u.modeFlags;
     _generation++;
     notifyListeners();
   }
