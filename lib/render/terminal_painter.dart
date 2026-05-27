@@ -54,6 +54,7 @@ class TerminalPainter extends CustomPainter {
     required this.cellWidth,
     required this.cellHeight,
     required this.blinkOn,
+    required this.selectionColor,
   })  : _paintGeneration = grid.generation,
         super(repaint: Listenable.merge([grid, blinkOn]));
 
@@ -62,6 +63,7 @@ class TerminalPainter extends CustomPainter {
   final double cellWidth;
   final double cellHeight;
   final ValueListenable<bool> blinkOn;
+  final int selectionColor;
   final int _paintGeneration;
 
   @override
@@ -85,7 +87,7 @@ class TerminalPainter extends CustomPainter {
         if (isSelected(grid.flagsAt(row, col))) {
           canvas.drawRect(
             Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight),
-            Paint()..color = const Color(0x553A6EA5),
+            Paint()..color = Color(selectionColor),
           );
         }
       }

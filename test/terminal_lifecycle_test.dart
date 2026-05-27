@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/engine_binding.dart';
 import 'package:flutter_alacritty/pty/pty_backend.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
@@ -77,6 +78,7 @@ void main() {
       required void Function(String) onTitle,
       required void Function() onBell,
       required void Function(String) onClipboard,
+      required engineConfig,
     }) => _FakeBinding();
 
     await tester.pumpWidget(MaterialApp(
@@ -106,10 +108,35 @@ void main() {
       home: TerminalScreen(
         title: ValueNotifier('t'),
         ptyFactory: boom,
-        engineFactory: ({required columns, required rows, required onPtyWrite, required onTitle, required onBell, required onClipboard}) => _FakeBinding(),
+        engineFactory: ({required columns, required rows, required onPtyWrite, required onTitle, required onBell, required onClipboard, required engineConfig}) => _FakeBinding(),
       ),
     ));
     await tester.pumpAndSettle();
     expect(find.textContaining('failed to start'), findsOneWidget);
+  });
+
+  testWidgets('window background comes from config', (tester) async {
+    final title = ValueNotifier<String>('t');
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalScreen(
+        title: title,
+        config: TerminalConfig.defaults()
+            .copyWith(colors: TerminalConfig.defaults().colors.copyWith(background: 0x102030)),
+        ptyFactory: ({required rows, required columns}) => _FakePty(),
+        engineFactory: ({
+          required columns,
+          required rows,
+          required onPtyWrite,
+          required onTitle,
+          required onBell,
+          required onClipboard,
+          required engineConfig,
+        }) => _FakeBinding(),
+      ),
+    ));
+    await tester.pump();
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+    expect(scaffold.backgroundColor, const Color(0xFF102030));
+    title.dispose();
   });
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/src/rust/api/terminal.dart';
 import 'package:flutter_alacritty/src/rust/event_proxy.dart';
 import 'package:flutter_alacritty/src/rust/frb_generated.dart';
@@ -46,7 +47,11 @@ void main() {
   });
 
   test('advanceAndTakeDamage round-trips and DSR emits a PtyWrite event', () async {
-    final engine = engineNew(columns: 20, rows: 5);
+    final engine = engineNew(
+      columns: 20,
+      rows: 5,
+      config: TerminalConfig.defaults().engineConfig,
+    );
 
     final u = await engineAdvanceAndTakeDamage(engine: engine, bytes: 'hi'.codeUnits);
     final line0 = u.lines.firstWhere((l) => l.line == 0);

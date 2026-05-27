@@ -38,7 +38,8 @@ class FrbEngineBinding implements EngineBinding {
     required this.onTitle,
     required this.onBell,
     required this.onClipboard,
-  }) : _engine = engineNew(columns: columns, rows: rows);
+    required EngineConfig engineConfig,
+  }) : _engine = engineNew(columns: columns, rows: rows, config: engineConfig);
 
   final TerminalEngine _engine;
   final void Function(Uint8List) onPtyWrite;

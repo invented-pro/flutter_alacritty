@@ -68,7 +68,8 @@ void main() {
             glyphs: glyphs,
             cellWidth: 8,
             cellHeight: 16,
-            blinkOn: _steadyBlink),
+            blinkOn: _steadyBlink,
+            selectionColor: 0x553A6EA5),
       ),
     ));
     await tester.pump();

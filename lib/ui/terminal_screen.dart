@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import '../config/terminal_config.dart';
 import '../engine/engine_binding.dart';
+import '../src/rust/engine.dart' show EngineConfig;
 import '../engine/terminal_engine_client.dart';
 import '../input/key_input.dart';
 import '../input/mouse_input.dart';
@@ -30,6 +32,7 @@ typedef EngineFactory = EngineBinding Function({
   required void Function(String) onTitle,
   required void Function() onBell,
   required void Function(String) onClipboard,
+  required EngineConfig engineConfig,
 });
 
 enum TermStatus { running, exited, error }
@@ -39,24 +42,27 @@ class TerminalScreen extends StatefulWidget {
     required this.title,
     this.ptyFactory,
     this.engineFactory,
+    this.config,
     super.key,
   });
 
   final ValueNotifier<String> title;
   final PtyFactory? ptyFactory;
   final EngineFactory? engineFactory;
+  final TerminalConfig? config;
 
   @override
   State<TerminalScreen> createState() => _TerminalScreenState();
 }
 
 class _TerminalScreenState extends State<TerminalScreen> {
-  static const _style = kTerminalTextStyle;
+  late final TerminalConfig _config = widget.config ?? TerminalConfig.defaults();
+  late final TextStyle _style = _config.textStyle;
   late final CellMetrics _metrics = CellMetrics.measure(_style);
   late final GlyphCache _glyphs = GlyphCache(
-    fontFamily: _style.fontFamily!,
-    fontFamilyFallback: _style.fontFamilyFallback ?? const [],
-    fontSize: _style.fontSize!,
+    fontFamily: _config.font.family,
+    fontFamilyFallback: _config.font.fallback,
+    fontSize: _config.font.size,
     cellWidth: _metrics.width,
   );
 
@@ -68,7 +74,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
   @override
   void initState() {
     super.initState();
-    _blinkTimer = Timer.periodic(const Duration(milliseconds: 530), (_) {
+    _blinkTimer = Timer.periodic(
+        Duration(milliseconds: _config.cursor.blinkInterval), (_) {
       _blinkOn.value = !_blinkOn.value;
     });
   }
@@ -126,6 +133,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         onTitle: (t) => widget.title.value = t,
         onBell: _flashBell,
         onClipboard: (t) => Clipboard.setData(ClipboardData(text: t)),
+        engineConfig: _config.engineConfig,
       );
       _pty = pty;
       _client = TerminalEngineClient(binding: binding, grid: _grid);
@@ -282,7 +290,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF181818),
+      backgroundColor: Color(0xFF000000 | _config.colors.background),
       body: LayoutBuilder(
         builder: (context, constraints) {
           final cols = (constraints.maxWidth / _metrics.width).floor().clamp(1, 1000);
@@ -305,7 +313,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     _client != null &&
                     e.buttons & kPrimaryButton != 0) {
                   final now = DateTime.now();
-                  _clickCount = (now.difference(_lastClick).inMilliseconds < 300)
+                  _clickCount = (now.difference(_lastClick).inMilliseconds <
+                          _config.mouse.doubleClickThreshold)
                       ? (_clickCount % 3) + 1
                       : 1;
                   _lastClick = now;
@@ -363,7 +372,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   }
                   return;
                 }
-                _client?.scrollLines(up ? 3 : -3);
+                _client?.scrollLines(
+                    up ? _config.scrolling.multiplier : -_config.scrolling.multiplier);
               },
               child: Stack(
                 children: [
@@ -375,6 +385,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       cellWidth: _metrics.width,
                       cellHeight: _metrics.height,
                       blinkOn: _blinkOn,
+                      selectionColor: _config.selectionOverlay,
                     ),
                   ),
                   if (_status != TermStatus.running)

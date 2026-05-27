@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_alacritty/config/config_loader.dart';
+import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/src/rust/frb_generated.dart';
 import 'package:flutter_alacritty/ui/terminal_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
-  runApp(const MyApp());
+  runApp(MyApp(config: ConfigLoader.load()));
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  const MyApp({required this.config, super.key});
+  final TerminalConfig config;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -36,7 +39,7 @@ class _MyAppState extends State<MyApp> {
         title: title,
         home: child,
       ),
-      child: TerminalScreen(title: _title),
+      child: TerminalScreen(title: _title, config: widget.config),
     );
   }
 }

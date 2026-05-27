@@ -16,6 +16,7 @@ class _CountingTerminalPainter extends TerminalPainter {
     required super.cellWidth,
     required super.cellHeight,
     required super.blinkOn,
+    required super.selectionColor,
   });
 
   @override
@@ -50,6 +51,7 @@ void main() {
             cellWidth: 8,
             cellHeight: 16,
             blinkOn: blinkOn,
+            selectionColor: 0x553A6EA5,
           ),
         ),
       ),
