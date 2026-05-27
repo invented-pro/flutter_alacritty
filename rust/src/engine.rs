@@ -384,6 +384,11 @@ mod tests {
             0,
             "the cell after a wide char must be WIDE_CHAR_SPACER"
         );
+        assert_eq!(
+            char::from_u32(row0.cells[1].codepoint).unwrap(),
+            ' ',
+            "WIDE_CHAR_SPACER cell.c is a space placeholder"
+        );
     }
 
     #[test]
