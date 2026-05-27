@@ -16,6 +16,7 @@ dependencies:
     path: rust_builder
   flutter_pty: ^0.4.0
   freezed_annotation: ^3.0.0
+  toml: ^0.18.0
 
 dev_dependencies:
   flutter_test:
