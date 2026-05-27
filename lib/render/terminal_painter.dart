@@ -16,6 +16,24 @@ const kTerminalTextStyle = TextStyle(
   height: 1.2,
 );
 
+/// Packed-RGB fg/bg after applying inverse (swap) and dim (darken fg).
+({int fg, int bg}) effectiveColors(int flags, int rawFg, int rawBg) {
+  var fg = rawFg, bg = rawBg;
+  if (flags & kFlagInverse != 0) {
+    final t = fg;
+    fg = bg;
+    bg = t;
+  }
+  if (flags & kFlagDim != 0) {
+    int dim(int c) => (c * 0.66).round().clamp(0, 255);
+    fg = (dim(fg >> 16 & 0xFF) << 16) | (dim(fg >> 8 & 0xFF) << 8) | dim(fg & 0xFF);
+  }
+  return (fg: fg, bg: bg);
+}
+
+({double underline, double strikeout}) decorationYs(double cellTop, double cellHeight) =>
+    (underline: cellTop + cellHeight - 1.5, strikeout: cellTop + cellHeight * 0.5);
+
 class TerminalPainter extends CustomPainter {
   TerminalPainter({
     required this.grid,
@@ -42,7 +60,12 @@ class TerminalPainter extends CustomPainter {
     for (var row = 0; row < rows; row++) {
       final y = row * cellHeight;
       for (var col = 0; col < cols; col++) {
-        bgPaint.color = Color(0xFF000000 | grid.bgAt(row, col));
+        final ec = effectiveColors(
+          grid.flagsAt(row, col),
+          grid.fgAt(row, col),
+          grid.bgAt(row, col),
+        );
+        bgPaint.color = Color(0xFF000000 | ec.bg);
         canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
       }
     }
@@ -57,17 +80,45 @@ class TerminalPainter extends CustomPainter {
         if (flags & kFlagWideSpacer != 0) continue; // covered by the wide glyph at col-1
         final cp = grid.codepointAt(row, col);
         if (cp == 32 || cp == 0) continue;
-        final fg = Color(0xFF000000 | grid.fgAt(row, col));
+        final ec = effectiveColors(flags, grid.fgAt(row, col), grid.bgAt(row, col));
+        final fg = Color(0xFF000000 | ec.fg);
         final cellRect = Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight);
         if (isBoxDrawing(cp) && paintBoxGlyph(canvas, cellRect, cp, fg, lineWidth)) {
-          continue;
-        }
-        final paragraph =
-            glyphs.tryGet(cp, grid.fgAt(row, col), wide: flags & kFlagWide != 0);
-        if (paragraph != null) {
-          canvas.drawParagraph(paragraph, Offset(col * cellWidth, y));
+          // fall through for underline/strikeout decorations
         } else {
-          needsWarmupFrame = true;
+          final paragraph = glyphs.tryGet(
+            cp,
+            ec.fg,
+            bold: flags & kFlagBold != 0,
+            italic: flags & kFlagItalic != 0,
+            wide: flags & kFlagWide != 0,
+          );
+          if (paragraph != null) {
+            canvas.drawParagraph(paragraph, Offset(col * cellWidth, y));
+          } else {
+            needsWarmupFrame = true;
+          }
+        }
+        if (flags & (kFlagUnderline | kFlagStrikeout) != 0) {
+          final x = col * cellWidth;
+          final decoPaint = Paint()
+            ..color = fg
+            ..strokeWidth = lineWidth;
+          final ys = decorationYs(y, cellHeight);
+          if (flags & kFlagUnderline != 0) {
+            canvas.drawLine(
+              Offset(x, ys.underline),
+              Offset(x + cellWidth, ys.underline),
+              decoPaint,
+            );
+          }
+          if (flags & kFlagStrikeout != 0) {
+            canvas.drawLine(
+              Offset(x, ys.strikeout),
+              Offset(x + cellWidth, ys.strikeout),
+              decoPaint,
+            );
+          }
         }
       }
     }

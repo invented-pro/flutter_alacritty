@@ -5,3 +5,5 @@ const int kFlagUnderline = 1 << 2;
 const int kFlagInverse = 1 << 3;
 const int kFlagWide = 1 << 4;
 const int kFlagWideSpacer = 1 << 5;
+const int kFlagDim = 1 << 6;
+const int kFlagStrikeout = 1 << 7;
