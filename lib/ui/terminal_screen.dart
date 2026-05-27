@@ -54,6 +54,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   StreamSubscription<Uint8List>? _outputSub;
   int _cols = 0, _rows = 0;
   bool _lastFocused = false;
+  int _pressedButton = 0; // last button pressed, for SGR release reporting
 
   // Repaint is driven by CustomPaint(repaint: _grid): MirrorGrid.apply() notifies,
   // RenderCustomPaint marks needs-paint, and the client requests a frame when it
@@ -185,18 +186,21 @@ class _TerminalScreenState extends State<TerminalScreen> {
             child: Listener(
               onPointerDown: (e) {
                 _focus.requestFocus();
-                _reportMouse(e.localPosition, _btn(e.buttons), MouseAction.down);
+                _pressedButton = _btn(e.buttons);
+                _reportMouse(e.localPosition, _pressedButton, MouseAction.down);
               },
               onPointerMove: (e) {
-                // DRAG (1002): only report move while a button is held; bare hover
-                // needs MOTION (1003), which is not wired yet.
-                if (e.buttons == 0 && (_grid.modeFlags & kModeMouseMotion) == 0) {
-                  return;
+                // DRAG (1002): report move while a button is held. Bare hover is
+                // reported as "no button" (code 3) only when MOTION (1003) is set.
+                if (e.buttons == 0) {
+                  if ((_grid.modeFlags & kModeMouseMotion) == 0) return;
+                  _reportMouse(e.localPosition, 3, MouseAction.move);
+                } else {
+                  _reportMouse(e.localPosition, _btn(e.buttons), MouseAction.move);
                 }
-                _reportMouse(e.localPosition, _btn(e.buttons), MouseAction.move);
               },
               onPointerUp: (e) =>
-                  _reportMouse(e.localPosition, 0, MouseAction.up),
+                  _reportMouse(e.localPosition, _pressedButton, MouseAction.up),
               onPointerSignal: (e) {
                 if (e is PointerScrollEvent) {
                   _reportMouse(

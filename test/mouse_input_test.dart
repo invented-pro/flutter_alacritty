@@ -42,4 +42,10 @@ void main() {
     expect(encodeMouse(0, MouseAction.down, 1, 1, ctrl: true, modeFlags: m),
         u('\x1b[<16;1;1M'.codeUnits)); // 0 + ctrl(16)
   });
+
+  test('buttonless motion under MOTION uses no-button code 3 (+32)', () {
+    final m = kModeMouseMotion | kModeSgrMouse;
+    expect(encodeMouse(3, MouseAction.move, 2, 2, modeFlags: m),
+        u('\x1b[<35;2;2M'.codeUnits)); // 3 (no button) + 32 (motion)
+  });
 }
