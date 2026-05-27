@@ -45,6 +45,8 @@ pub const FLAG_UNDERLINE: u16 = 1 << 2;
 pub const FLAG_INVERSE: u16 = 1 << 3;
 pub const FLAG_WIDE: u16 = 1 << 4;
 pub const FLAG_WIDE_SPACER: u16 = 1 << 5;
+pub const FLAG_DIM: u16 = 1 << 6;
+pub const FLAG_STRIKEOUT: u16 = 1 << 7;
 
 const DEFAULT_FG: u32 = 0x00D8_D8D8;
 const DEFAULT_BG: u32 = 0x0018_1818;
@@ -152,6 +154,12 @@ fn map_flags(f: Flags) -> u16 {
     }
     if f.contains(Flags::WIDE_CHAR_SPACER) {
         out |= FLAG_WIDE_SPACER;
+    }
+    if f.contains(Flags::DIM) {
+        out |= FLAG_DIM;
+    }
+    if f.contains(Flags::STRIKEOUT) {
+        out |= FLAG_STRIKEOUT;
     }
     out
 }
@@ -388,6 +396,20 @@ mod tests {
             char::from_u32(row0.cells[1].codepoint).unwrap(),
             ' ',
             "WIDE_CHAR_SPACER cell.c is a space placeholder"
+        );
+    }
+
+    #[test]
+    fn maps_dim_and_strikeout_flags() {
+        let mut e = engine(20, 5);
+        e.advance(b"\x1b[2mD".to_vec()); // SGR 2 = dim
+        assert_ne!(line(&e.full_snapshot(), 0).cells[0].flags & FLAG_DIM, 0);
+
+        let mut e2 = engine(20, 5);
+        e2.advance(b"\x1b[9mS".to_vec()); // SGR 9 = strikeout
+        assert_ne!(
+            line(&e2.full_snapshot(), 0).cells[0].flags & FLAG_STRIKEOUT,
+            0
         );
     }
 
