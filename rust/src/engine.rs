@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use crate::event_proxy::{EngineEvent, EventProxy, EventQueue};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line};
-use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
+use alacritty_terminal::term::cell::{Cell, Flags};
+use alacritty_terminal::term::{point_to_viewport, Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 
 /// Flat, FFI-friendly cell. fg/bg are packed 0x00RRGGBB.
@@ -32,6 +32,7 @@ pub struct RenderUpdate {
     pub cursor_shape: u8,
     pub cursor_blinking: bool,
     pub mode_flags: u32,
+    pub display_offset: u32,
 }
 
 impl RenderUpdate {
@@ -167,6 +168,15 @@ fn map_flags(f: Flags) -> u16 {
     out
 }
 
+fn cell_data(cell: &Cell) -> CellData {
+    CellData {
+        codepoint: cell.c as u32,
+        fg: resolve_color(cell.fg, true),
+        bg: resolve_color(cell.bg, false),
+        flags: map_flags(cell.flags),
+    }
+}
+
 pub struct TerminalEngine {
     term: Term<EventProxy>,
     parser: Processor,
@@ -206,22 +216,20 @@ impl TerminalEngine {
         self.term.resize(size);
     }
 
-    /// Cells of a single viewport row (display_offset is 0 in Plan 2A — no scrollback).
+    pub fn scroll_lines(&mut self, delta: i32) {
+        self.term.scroll_display(Scroll::Delta(delta));
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.term.scroll_display(Scroll::Bottom);
+    }
+
+    /// Cells of a single viewport row.
     fn line_cells(&self, row: usize) -> Vec<CellData> {
         let grid = self.term.grid();
         let cols = grid.columns();
-        let mut cells = Vec::with_capacity(cols);
         let g_line = &grid[Line(row as i32)];
-        for col in 0..cols {
-            let cell = &g_line[Column(col)];
-            cells.push(CellData {
-                codepoint: cell.c as u32,
-                fg: resolve_color(cell.fg, true),
-                bg: resolve_color(cell.bg, false),
-                flags: map_flags(cell.flags),
-            });
-        }
-        cells
+        (0..cols).map(|col| cell_data(&g_line[Column(col)])).collect()
     }
 
     fn cursor_fields(&self) -> (u32, u32, bool, u8, bool) {
@@ -244,13 +252,28 @@ impl TerminalEngine {
     }
 
     pub fn full_snapshot(&self) -> RenderUpdate {
+        let cols = self.term.columns();
         let rows = self.term.screen_lines();
-        let lines = (0..rows)
-            .map(|row| LineUpdate {
-                line: row as u32,
-                cells: self.line_cells(row),
+        let display_offset = self.term.grid().display_offset();
+        let blank = CellData {
+            codepoint: ' ' as u32,
+            fg: DEFAULT_FG,
+            bg: DEFAULT_BG,
+            flags: 0,
+        };
+        let mut lines: Vec<LineUpdate> = (0..rows)
+            .map(|r| LineUpdate {
+                line: r as u32,
+                cells: vec![blank.clone(); cols],
             })
             .collect();
+        for indexed in self.term.grid().display_iter() {
+            if let Some(vp) = point_to_viewport(display_offset, indexed.point) {
+                if vp.line < rows && vp.column.0 < cols {
+                    lines[vp.line].cells[vp.column.0] = cell_data(indexed.cell);
+                }
+            }
+        }
         let (cursor_line, cursor_col, cursor_visible, cursor_shape, cursor_blinking) =
             self.cursor_fields();
         RenderUpdate {
@@ -258,14 +281,18 @@ impl TerminalEngine {
             full: true,
             cursor_line,
             cursor_col,
-            cursor_visible,
+            cursor_visible: cursor_visible && display_offset == 0,
             cursor_shape,
             cursor_blinking,
             mode_flags: self.term.mode().bits(),
+            display_offset: display_offset as u32,
         }
     }
 
     pub fn take_damage(&mut self) -> RenderUpdate {
+        if self.term.grid().display_offset() > 0 {
+            return self.full_snapshot();
+        }
         // Collect damaged viewport rows, then drop the borrow before reading cells.
         let damaged: Option<Vec<usize>> = match self.term.damage() {
             TermDamage::Full => None,
@@ -304,6 +331,7 @@ impl TerminalEngine {
                     cursor_shape,
                     cursor_blinking,
                     mode_flags: self.term.mode().bits(),
+                    display_offset: 0,
                 }
             }
         }
@@ -460,6 +488,29 @@ mod tests {
         assert_ne!(e.full_snapshot().mode_flags & (1 << 4), 0);
         e.advance(b"\x1b[?1l".to_vec()); // reset DECCKM
         assert_eq!(e.full_snapshot().mode_flags & (1 << 1), 0);
+    }
+
+    #[test]
+    fn scroll_shows_history_then_returns_to_bottom() {
+        let mut e = engine(10, 3); // 3 visible rows
+        for i in 0..10 {
+            e.advance(format!("line{}\r\n", i).into_bytes());
+        }
+        // At bottom: latest lines visible, offset 0.
+        assert_eq!(e.full_snapshot().display_offset, 0);
+
+        e.scroll_lines(2); // scroll up 2 lines into history
+        let u = e.full_snapshot();
+        assert_eq!(u.display_offset, 2);
+        // Row 0 now shows an older line than it did at the bottom.
+        let row0: String = u.lines.iter().find(|l| l.line == 0).unwrap()
+            .cells.iter().map(|c| char::from_u32(c.codepoint).unwrap()).collect();
+        assert!(row0.trim_end().starts_with("line"));
+        // Cursor is hidden while scrolled back.
+        assert!(!u.cursor_visible);
+
+        e.scroll_to_bottom();
+        assert_eq!(e.full_snapshot().display_offset, 0);
     }
 
     #[test]
