@@ -11,6 +11,8 @@ import '../src/rust/event_proxy.dart';
 abstract class EngineBinding {
   Future<void> advance(Uint8List bytes);
   Future<GridUpdate> takeDamage();
+  /// Parse PTY bytes and return damage in one FFI hop (preferred hot path).
+  Future<GridUpdate> advanceAndTakeDamage(Uint8List bytes);
   /// Drain queued terminal→host events and dispatch them (PtyWrite/Title/…).
   /// Kept on the binding so the client stays free of FRB event types.
   void pumpEvents();
@@ -42,6 +44,10 @@ class FrbEngineBinding implements EngineBinding {
   @override
   Future<GridUpdate> takeDamage() async =>
       _toGridUpdate(await engineTakeDamage(engine: _engine));
+
+  @override
+  Future<GridUpdate> advanceAndTakeDamage(Uint8List bytes) async =>
+      _toGridUpdate(await engineAdvanceAndTakeDamage(engine: _engine, bytes: bytes));
 
   @override
   void pumpEvents() {
@@ -76,15 +82,22 @@ class FrbEngineBinding implements EngineBinding {
         cursorRow: u.cursorLine,
         cursorCol: u.cursorCol,
         cursorVisible: u.cursorVisible,
-        lines: u.lines
-            .map((l) => LineCells(
-                  line: l.line,
-                  codepoints: Int32List.fromList(l.cells.map((c) => c.codepoint).toList()),
-                  fg: Int32List.fromList(l.cells.map((c) => c.fg).toList()),
-                  bg: Int32List.fromList(l.cells.map((c) => c.bg).toList()),
-                ))
-            .toList(),
+        lines: u.lines.map(_lineCells).toList(),
       );
+
+  LineCells _lineCells(LineUpdate l) {
+    final n = l.cells.length;
+    final codepoints = Int32List(n);
+    final fg = Int32List(n);
+    final bg = Int32List(n);
+    for (var i = 0; i < n; i++) {
+      final c = l.cells[i];
+      codepoints[i] = c.codepoint;
+      fg[i] = c.fg;
+      bg[i] = c.bg;
+    }
+    return LineCells(line: l.line, codepoints: codepoints, fg: fg, bg: bg);
+  }
 
   int _maxLine(RenderUpdate u) => u.lines.map((l) => l.line).reduce((a, b) => a > b ? a : b);
 }

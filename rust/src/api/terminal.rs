@@ -26,6 +26,15 @@ pub async fn engine_take_damage(engine: &mut TerminalEngine) -> RenderUpdate {
     )
 }
 
+/// Single FFI round-trip: parse PTY bytes then return damage (hot path).
+pub async fn engine_advance_and_take_damage(
+    engine: &mut TerminalEngine,
+    bytes: Vec<u8>,
+) -> RenderUpdate {
+    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| engine.advance(bytes)));
+    engine_take_damage(engine).await
+}
+
 #[frb(sync)]
 pub fn engine_take_events(engine: &TerminalEngine) -> Vec<EngineEvent> {
     engine.take_events()

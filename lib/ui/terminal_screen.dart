@@ -62,7 +62,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
     _pty = pty;
     _client = TerminalEngineClient(binding: binding, grid: _grid);
-    _grid.apply(binding.fullSnapshot()); // first frame
+    _grid.initializeEmpty(rows, cols);
     _outputSub = pty.output.listen(_client!.feed);
   }
 

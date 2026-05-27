@@ -24,6 +24,15 @@ Future<void> engineAdvance({
 Future<RenderUpdate> engineTakeDamage({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineTakeDamage(engine: engine);
 
+/// Single FFI round-trip: parse PTY bytes then return damage (hot path).
+Future<RenderUpdate> engineAdvanceAndTakeDamage({
+  required TerminalEngine engine,
+  required List<int> bytes,
+}) => RustLib.instance.api.crateApiTerminalEngineAdvanceAndTakeDamage(
+  engine: engine,
+  bytes: bytes,
+);
+
 List<EngineEvent> engineTakeEvents({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineTakeEvents(engine: engine);
 

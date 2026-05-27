@@ -66,6 +66,15 @@ class MirrorGrid extends ChangeNotifier {
     _bg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, 0x181818));
   }
 
+  /// Empty viewport for startup — avoids a sync full_snapshot FFI round-trip.
+  void initializeEmpty(int rows, int columns) {
+    _ensureSize(rows, columns);
+    _cursorRow = 0;
+    _cursorCol = 0;
+    _cursorVisible = true;
+    notifyListeners();
+  }
+
   void apply(GridUpdate u) {
     if (u.full || u.rows != _rows || u.columns != _columns) {
       _ensureSize(u.rows, u.columns);

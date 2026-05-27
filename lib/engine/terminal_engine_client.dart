@@ -43,8 +43,7 @@ class TerminalEngineClient {
     _advancing = true;
     final batch = _buf.takeBytes();
     try {
-      await _binding.advance(batch);
-      final update = await _binding.takeDamage();
+      final update = await _binding.advanceAndTakeDamage(batch);
       _grid.apply(update);
       _binding.pumpEvents(); // route PtyWrite/Title/Bell/Clipboard for this batch
     } finally {

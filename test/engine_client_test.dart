@@ -17,6 +17,11 @@ class _FakeBinding implements EngineBinding {
       full: false, rows: 1, columns: 1, lines: const [],
       cursorRow: 0, cursorCol: 0, cursorVisible: true);
   @override
+  Future<GridUpdate> advanceAndTakeDamage(Uint8List bytes) async {
+    await advance(bytes);
+    return takeDamage();
+  }
+  @override
   void pumpEvents() {}
   @override
   void resize(int columns, int rows) {}
