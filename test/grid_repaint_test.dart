@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/render/glyph_cache.dart';
@@ -14,6 +15,7 @@ class _CountingTerminalPainter extends TerminalPainter {
     required super.glyphs,
     required super.cellWidth,
     required super.cellHeight,
+    required super.blinkOn,
   });
 
   @override
@@ -34,6 +36,7 @@ void main() {
     final grid = MirrorGrid();
     grid.initializeEmpty(1, 2);
     final glyphs = GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
+    final blinkOn = ValueNotifier(true);
     _paintCount = 0;
 
     await tester.pumpWidget(
@@ -46,6 +49,7 @@ void main() {
             glyphs: glyphs,
             cellWidth: 8,
             cellHeight: 16,
+            blinkOn: blinkOn,
           ),
         ),
       ),

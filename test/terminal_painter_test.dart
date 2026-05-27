@@ -1,12 +1,15 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/render/cell_flags.dart';
 import 'package:flutter_alacritty/render/glyph_cache.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/render/terminal_painter.dart';
+
+final _steadyBlink = ValueNotifier(true);
 
 class _RecordingGlyphCache extends GlyphCache {
   _RecordingGlyphCache()
@@ -21,6 +24,16 @@ class _RecordingGlyphCache extends GlyphCache {
 }
 
 void main() {
+  test('cursor rect matches shape', () {
+    expect(cursorRect(0, 8, 16, 2.0), const Rect.fromLTWH(0, 0, 8, 16));
+    final beam = cursorRect(2, 8, 16, 2.0);
+    expect(beam.width, lessThan(8));
+    expect(beam.left, 0);
+    final underline = cursorRect(1, 8, 16, 2.0);
+    expect(underline.bottom, 16);
+    expect(underline.height, lessThan(16));
+  });
+
   test('underline sits near the bottom, strikeout near the middle', () {
     final ys = decorationYs(0.0, 20.0);
     expect(ys.underline, greaterThan(15.0));
@@ -51,7 +64,11 @@ void main() {
       child: CustomPaint(
         size: const Size(16, 16),
         painter: TerminalPainter(
-            grid: grid, glyphs: glyphs, cellWidth: 8, cellHeight: 16),
+            grid: grid,
+            glyphs: glyphs,
+            cellWidth: 8,
+            cellHeight: 16,
+            blinkOn: _steadyBlink),
       ),
     ));
     await tester.pump();

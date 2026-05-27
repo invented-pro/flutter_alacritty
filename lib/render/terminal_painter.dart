@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -34,19 +35,33 @@ const kTerminalTextStyle = TextStyle(
 ({double underline, double strikeout}) decorationYs(double cellTop, double cellHeight) =>
     (underline: cellTop + cellHeight - 1.5, strikeout: cellTop + cellHeight * 0.5);
 
+/// Cursor rect for shape (0 block, 1 underline, 2 beam, 3 hollow) at cell origin.
+Rect cursorRect(int shape, double cellWidth, double cellHeight, double lineWidth) {
+  switch (shape) {
+    case 2: // beam
+      return Rect.fromLTWH(0, 0, lineWidth * 2, cellHeight);
+    case 1: // underline
+      return Rect.fromLTWH(0, cellHeight - lineWidth * 2, cellWidth, lineWidth * 2);
+    default: // block (0) and hollow (3) use the full cell
+      return Rect.fromLTWH(0, 0, cellWidth, cellHeight);
+  }
+}
+
 class TerminalPainter extends CustomPainter {
   TerminalPainter({
     required this.grid,
     required this.glyphs,
     required this.cellWidth,
     required this.cellHeight,
+    required this.blinkOn,
   })  : _paintGeneration = grid.generation,
-        super(repaint: grid);
+        super(repaint: Listenable.merge([grid, blinkOn]));
 
   final MirrorGrid grid;
   final GlyphCache glyphs;
   final double cellWidth;
   final double cellHeight;
+  final ValueListenable<bool> blinkOn;
   final int _paintGeneration;
 
   @override
@@ -124,16 +139,22 @@ class TerminalPainter extends CustomPainter {
     }
     if (needsWarmupFrame) SchedulerBinding.instance.scheduleFrame();
 
-    // Cursor — spans two cells when sitting on a wide char.
-    if (grid.cursorVisible) {
+    // Pass 3: cursor.
+    final blinkVisible = !grid.cursorBlinking || blinkOn.value;
+    if (grid.cursorVisible && grid.cursorShape != 4 && blinkVisible) {
       final onWide = grid.cursorRow < rows &&
           grid.cursorCol < cols &&
           grid.flagsAt(grid.cursorRow, grid.cursorCol) & kFlagWide != 0;
       final cw = onWide ? cellWidth * 2 : cellWidth;
-      canvas.drawRect(
-        Rect.fromLTWH(grid.cursorCol * cellWidth, grid.cursorRow * cellHeight, cw, cellHeight),
-        Paint()..color = const Color(0x88FFFFFF),
-      );
+      final base = cursorRect(grid.cursorShape, cw, cellHeight, lineWidth)
+          .translate(grid.cursorCol * cellWidth, grid.cursorRow * cellHeight);
+      final paint = Paint()..color = const Color(0x88FFFFFF);
+      if (grid.cursorShape == 3) {
+        paint
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = lineWidth;
+      }
+      canvas.drawRect(base, paint);
     }
   }
 
