@@ -96,12 +96,16 @@ class TerminalEngineClient {
 
   Future<void> scrollLines(int delta) async {
     await _binding.scrollLines(delta);
-    _grid.apply(await _binding.takeDamage()); // scrolled -> full snapshot
+    // Scroll changes the view, not cell content, so damage is empty/partial at
+    // offset 0 — re-render the whole viewport from a full snapshot.
+    _grid.apply(_binding.fullSnapshot());
     SchedulerBinding.instance.scheduleFrame();
   }
 
   Future<void> scrollToBottom() async {
     await _binding.scrollToBottom();
+    _grid.apply(_binding.fullSnapshot()); // view moved back to bottom -> full render
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   void dispose() => _binding.dispose();

@@ -163,9 +163,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
     return (row, col, rightHalf);
   }
 
-  Future<void> _refreshSelection() async {
+  void _refreshSelection() {
     if (_client == null) return;
-    _grid.apply(await _client!.binding.takeDamage());
+    // Selection changes FLAG_SELECTED on cells whose content didn't change, so
+    // partial damage misses them — re-render from a full snapshot.
+    _grid.apply(_client!.binding.fullSnapshot());
     SchedulerBinding.instance.scheduleFrame();
   }
 
