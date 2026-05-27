@@ -16,12 +16,14 @@ class TerminalPainter extends CustomPainter {
     required this.glyphs,
     required this.cellWidth,
     required this.cellHeight,
-  }) : super(repaint: grid);
+  })  : _paintGeneration = grid.generation,
+        super(repaint: grid);
 
   final MirrorGrid grid;
   final GlyphCache glyphs;
   final double cellWidth;
   final double cellHeight;
+  final int _paintGeneration;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -65,7 +67,7 @@ class TerminalPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant TerminalPainter old) =>
       old.grid != grid ||
-      old.grid.generation != grid.generation ||
+      old._paintGeneration != _paintGeneration ||
       old.cellWidth != cellWidth ||
       old.cellHeight != cellHeight;
 }

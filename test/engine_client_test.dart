@@ -72,6 +72,25 @@ void main() {
     expect(binding.totalBytes, [1, 2, 3, 4, 5]);
   });
 
+  test('drain apply bumps grid generation', () async {
+    final binding = _FakeBinding();
+    final grid = MirrorGrid();
+    grid.initializeEmpty(1, 1);
+    late void Function() pendingDrain;
+    final client = TerminalEngineClient(
+      binding: binding,
+      grid: grid,
+      schedule: (cb) => pendingDrain = cb,
+    );
+    final gen0 = grid.generation;
+
+    client.feed(Uint8List.fromList([1]));
+    pendingDrain();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(grid.generation, greaterThan(gen0));
+  });
+
   test('resize applies full snapshot dimensions to grid', () {
     final binding = _FakeBinding();
     final grid = MirrorGrid();

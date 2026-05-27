@@ -36,6 +36,22 @@ void main() {
     expect(g.cursorRow, 1);
   });
 
+  test('apply increments generation for shouldRepaint', () {
+    final g = MirrorGrid();
+    g.initializeEmpty(2, 3);
+    final before = g.generation;
+    g.apply(GridUpdate(
+      full: false,
+      rows: 2,
+      columns: 3,
+      lines: [row(0, 'hi')],
+      cursorRow: 0,
+      cursorCol: 2,
+      cursorVisible: true,
+    ));
+    expect(g.generation, before + 1);
+  });
+
   test('partial update does not shrink viewport from inferred rows', () {
     final g = MirrorGrid();
     g.initializeEmpty(24, 80);
