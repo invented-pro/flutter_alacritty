@@ -1,4 +1,6 @@
-use alacritty_terminal::event::{Event, EventListener};
+use std::sync::{Arc, Mutex};
+
+use crate::event_proxy::{EngineEvent, EventProxy, EventQueue};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags;
@@ -150,16 +152,10 @@ fn map_flags(f: Flags) -> u16 {
     out
 }
 
-/// Tracer-bullet event sink: drop everything. Plan 2 forwards events to Dart.
-#[derive(Clone)]
-pub struct NoopListener;
-impl EventListener for NoopListener {
-    fn send_event(&self, _event: Event) {}
-}
-
 pub struct TerminalEngine {
-    term: Term<NoopListener>,
+    term: Term<EventProxy>,
     parser: Processor,
+    events: EventQueue,
 }
 
 impl TerminalEngine {
@@ -168,11 +164,17 @@ impl TerminalEngine {
             columns as usize,
             rows as usize,
         );
-        let term = Term::new(Config::default(), &size, NoopListener);
+        let events: EventQueue = Arc::new(Mutex::new(Vec::new()));
+        let term = Term::new(Config::default(), &size, EventProxy::new(events.clone()));
         TerminalEngine {
             term,
             parser: Processor::new(),
+            events,
         }
+    }
+
+    pub fn take_events(&self) -> Vec<EngineEvent> {
+        std::mem::take(&mut *self.events.lock().unwrap())
     }
 
     pub fn advance(&mut self, bytes: Vec<u8>) {
@@ -231,6 +233,7 @@ impl TerminalEngine {
             cursor_visible,
         }
     }
+
 }
 
 #[cfg(test)]
@@ -288,4 +291,5 @@ mod tests {
         assert_eq!(u.lines.len(), 10);
         assert_eq!(line(&u, 0).cells.len(), 40);
     }
+
 }
