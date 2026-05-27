@@ -174,12 +174,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored; // ignore key-up so a stray release can't restart
+    }
     if (_status != TermStatus.running) {
       _restart();
       return KeyEventResult.handled;
-    }
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
     }
     final hw = HardwareKeyboard.instance;
     if (hw.isControlPressed &&
