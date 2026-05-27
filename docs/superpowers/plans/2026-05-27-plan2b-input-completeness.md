@@ -685,6 +685,8 @@ Wrap the `CustomPaint` in the `build` method with a `Listener` (inside the exist
 ```
 (`kSecondaryButton`/`kMiddleMouseButton`/`PointerScrollEvent` come from `package:flutter/gestures.dart`; add `import 'package:flutter/gestures.dart';`. Remove the now-unused `GestureDetector` wrapper.)
 
+> **Known limitation (validated):** `onPointerMove` fires only while a button is held, so this covers mouse **drag/button-event** mode (1002) — the common case. Bare-hover tracking under **any-event** mode (1003) is *not* wired; doing it correctly needs `onPointerHover` plus a "no button" code (3) for motion, so it's deferred rather than half-implemented with a wrong button code. Record in findings if any target app needs 1003.
+
 - [ ] **Step 2: Verify analysis + tests**
 
 Run:
