@@ -30,6 +30,16 @@ void main() {
     expect(identical(narrow, wide), isFalse);
   });
 
+  test('bold and italic produce distinct cached glyphs', () {
+    final cache = GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
+    final plain = cache.tryGet(0x41, 0xFFFFFF);
+    final bold = cache.tryGet(0x41, 0xFFFFFF, bold: true);
+    final italic = cache.tryGet(0x41, 0xFFFFFF, italic: true);
+    expect(identical(plain, bold), isFalse);
+    expect(identical(plain, italic), isFalse);
+    expect(identical(bold, italic), isFalse);
+  });
+
   test('returns null past the per-frame build budget', () {
     final cache = GlyphCache(
         fontFamily: 'monospace', fontSize: 14, cellWidth: 8, maxBuildsPerFrame: 1);

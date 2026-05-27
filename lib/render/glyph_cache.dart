@@ -32,8 +32,13 @@ class GlyphCache {
   /// Returns a cached paragraph, or builds one if under the per-frame budget.
   /// Returns null when the budget is exhausted (the painter schedules a warmup
   /// frame and the glyph fills in next frame).
-  ui.Paragraph? tryGet(int codepoint, int fg, {bool wide = false}) {
-    final key = (codepoint << 25) ^ ((wide ? 1 : 0) << 24) ^ (fg & 0xFFFFFF);
+  ui.Paragraph? tryGet(int codepoint, int fg,
+      {bool bold = false, bool italic = false, bool wide = false}) {
+    final key = (codepoint << 27) ^
+        ((bold ? 1 : 0) << 26) ^
+        ((italic ? 1 : 0) << 25) ^
+        ((wide ? 1 : 0) << 24) ^
+        (fg & 0xFFFFFF);
     final existing = _cache.remove(key); // remove+reinsert = LRU touch
     if (existing != null) {
       _cache[key] = existing;
@@ -41,7 +46,7 @@ class GlyphCache {
     }
     if (_buildsThisFrame >= maxBuildsPerFrame) return null;
     _buildsThisFrame++;
-    final p = _build(codepoint, fg, wide: wide);
+    final p = _build(codepoint, fg, bold: bold, italic: italic, wide: wide);
     _cache[key] = p;
     if (_cache.length > maxEntries) {
       _cache.remove(_cache.keys.first); // evict eldest
@@ -49,7 +54,8 @@ class GlyphCache {
     return p;
   }
 
-  ui.Paragraph _build(int codepoint, int fg, {bool wide = false}) {
+  ui.Paragraph _build(int codepoint, int fg,
+      {bool bold = false, bool italic = false, bool wide = false}) {
     final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
       fontFamily: fontFamily,
       fontSize: fontSize,
@@ -59,6 +65,8 @@ class GlyphCache {
         fontFamily: fontFamily,
         fontFamilyFallback: fontFamilyFallback,
         fontSize: fontSize,
+        fontWeight: bold ? ui.FontWeight.bold : ui.FontWeight.normal,
+        fontStyle: italic ? ui.FontStyle.italic : ui.FontStyle.normal,
       ))
       ..addText(String.fromCharCode(codepoint));
     final width = wide ? cellWidth * 2 : cellWidth;
