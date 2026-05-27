@@ -31,6 +31,7 @@ pub struct RenderUpdate {
     pub cursor_visible: bool,
     pub cursor_shape: u8,
     pub cursor_blinking: bool,
+    pub mode_flags: u32,
 }
 
 impl RenderUpdate {
@@ -260,6 +261,7 @@ impl TerminalEngine {
             cursor_visible,
             cursor_shape,
             cursor_blinking,
+            mode_flags: self.term.mode().bits(),
         }
     }
 
@@ -301,6 +303,7 @@ impl TerminalEngine {
                     cursor_visible,
                     cursor_shape,
                     cursor_blinking,
+                    mode_flags: self.term.mode().bits(),
                 }
             }
         }
@@ -446,6 +449,17 @@ mod tests {
             line(&e2.full_snapshot(), 0).cells[0].flags & FLAG_STRIKEOUT,
             0
         );
+    }
+
+    #[test]
+    fn mode_flags_reflect_private_modes() {
+        let mut e = engine(20, 5);
+        e.advance(b"\x1b[?1h".to_vec()); // DECCKM -> APP_CURSOR (1<<1)
+        assert_ne!(e.full_snapshot().mode_flags & (1 << 1), 0);
+        e.advance(b"\x1b[?2004h".to_vec()); // bracketed paste (1<<4)
+        assert_ne!(e.full_snapshot().mode_flags & (1 << 4), 0);
+        e.advance(b"\x1b[?1l".to_vec()); // reset DECCKM
+        assert_eq!(e.full_snapshot().mode_flags & (1 << 1), 0);
     }
 
     #[test]
