@@ -67,6 +67,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         _rows = rows;
         _client!.resize(cols, rows);
         _pty!.resize(rows, cols);
+        _client!.scrollToBottom();
       }
       return;
     }
@@ -116,6 +117,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
       modeFlags: _grid.modeFlags,
     );
     if (bytes == null) return KeyEventResult.ignored;
+    _client?.scrollToBottom();
     _pty?.write(bytes);
     return KeyEventResult.handled;
   }
@@ -202,13 +204,21 @@ class _TerminalScreenState extends State<TerminalScreen> {
               onPointerUp: (e) =>
                   _reportMouse(e.localPosition, _pressedButton, MouseAction.up),
               onPointerSignal: (e) {
-                if (e is PointerScrollEvent) {
-                  _reportMouse(
-                    e.localPosition,
-                    0,
-                    e.scrollDelta.dy < 0 ? MouseAction.scrollUp : MouseAction.scrollDown,
-                  );
+                if (e is! PointerScrollEvent) return;
+                final up = e.scrollDelta.dy < 0;
+                if (anyMouse(_grid.modeFlags)) {
+                  _reportMouse(e.localPosition, 0,
+                      up ? MouseAction.scrollUp : MouseAction.scrollDown);
+                  return;
                 }
+                if (_grid.modeFlags & kModeAltScreen != 0) {
+                  final arrow = up ? [0x1b, 0x4f, 0x41] : [0x1b, 0x4f, 0x42]; // SS3 A/B
+                  for (var i = 0; i < 3; i++) {
+                    _pty?.write(Uint8List.fromList(arrow));
+                  }
+                  return;
+                }
+                _client?.scrollLines(up ? 3 : -3);
               },
               child: CustomPaint(
                 size: Size.infinite,
