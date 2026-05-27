@@ -2,6 +2,17 @@ import 'package:flutter/material.dart';
 
 import 'mirror_grid.dart';
 
+/// System monospace from `fc-match monospace` on this Linux desktop.
+const kTerminalFontFamily = 'DejaVu Sans Mono';
+
+/// Default terminal [TextStyle]; measure with [CellMetrics.measure].
+const kTerminalTextStyle = TextStyle(
+  fontFamily: kTerminalFontFamily,
+  fontFamilyFallback: ['monospace'],
+  fontSize: 14,
+  height: 1.2,
+);
+
 /// Monospace cell metrics measured once from the text style.
 class CellMetrics {
   CellMetrics(this.width, this.height);

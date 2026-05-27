@@ -18,11 +18,7 @@ class TerminalScreen extends StatefulWidget {
 }
 
 class _TerminalScreenState extends State<TerminalScreen> {
-  static const _style = TextStyle(
-    fontFamily: 'monospace',
-    fontSize: 14,
-    height: 1.2,
-  );
+  static const _style = kTerminalTextStyle;
 
   late final CellMetrics _metrics = CellMetrics.measure(_style);
   final MirrorGrid _grid = MirrorGrid();
