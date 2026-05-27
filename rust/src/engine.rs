@@ -5,7 +5,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
-use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, Rgb};
+use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 
 /// Flat, FFI-friendly cell. fg/bg are packed 0x00RRGGBB.
 #[derive(Clone, Debug)]
@@ -29,6 +29,8 @@ pub struct RenderUpdate {
     pub cursor_line: u32,
     pub cursor_col: u32,
     pub cursor_visible: bool,
+    pub cursor_shape: u8,
+    pub cursor_blinking: bool,
 }
 
 impl RenderUpdate {
@@ -221,12 +223,22 @@ impl TerminalEngine {
         cells
     }
 
-    fn cursor_fields(&self) -> (u32, u32, bool) {
+    fn cursor_fields(&self) -> (u32, u32, bool, u8, bool) {
         let cursor = self.term.grid().cursor.point;
+        let style = self.term.cursor_style();
+        let shape = match style.shape {
+            CursorShape::Block => 0,
+            CursorShape::Underline => 1,
+            CursorShape::Beam => 2,
+            CursorShape::HollowBlock => 3,
+            CursorShape::Hidden => 4,
+        };
         (
             cursor.line.0.max(0) as u32,
             cursor.column.0 as u32,
             self.term.mode().contains(TermMode::SHOW_CURSOR),
+            shape,
+            style.blinking,
         )
     }
 
@@ -238,13 +250,16 @@ impl TerminalEngine {
                 cells: self.line_cells(row),
             })
             .collect();
-        let (cursor_line, cursor_col, cursor_visible) = self.cursor_fields();
+        let (cursor_line, cursor_col, cursor_visible, cursor_shape, cursor_blinking) =
+            self.cursor_fields();
         RenderUpdate {
             lines,
             full: true,
             cursor_line,
             cursor_col,
             cursor_visible,
+            cursor_shape,
+            cursor_blinking,
         }
     }
 
@@ -256,13 +271,16 @@ impl TerminalEngine {
         };
         self.term.reset_damage();
 
-        let (cursor_line, cursor_col, cursor_visible) = self.cursor_fields();
+        let (cursor_line, cursor_col, cursor_visible, cursor_shape, cursor_blinking) =
+            self.cursor_fields();
         match damaged {
             None => {
                 let mut u = self.full_snapshot();
                 u.cursor_line = cursor_line;
                 u.cursor_col = cursor_col;
                 u.cursor_visible = cursor_visible;
+                u.cursor_shape = cursor_shape;
+                u.cursor_blinking = cursor_blinking;
                 u
             }
             Some(mut rows) => {
@@ -281,6 +299,8 @@ impl TerminalEngine {
                     cursor_line,
                     cursor_col,
                     cursor_visible,
+                    cursor_shape,
+                    cursor_blinking,
                 }
             }
         }
@@ -397,6 +417,21 @@ mod tests {
             ' ',
             "WIDE_CHAR_SPACER cell.c is a space placeholder"
         );
+    }
+
+    #[test]
+    fn cursor_style_shape_and_blinking_exposed() {
+        let mut e = engine(20, 5);
+        e.advance(b"\x1b[5 q".to_vec()); // DECSCUSR 5 = blinking bar (beam)
+        let u = e.full_snapshot();
+        assert_eq!(u.cursor_shape, 2); // beam
+        assert!(u.cursor_blinking);
+
+        let mut e2 = engine(20, 5);
+        e2.advance(b"\x1b[2 q".to_vec()); // 2 = steady block
+        let u2 = e2.full_snapshot();
+        assert_eq!(u2.cursor_shape, 0); // block
+        assert!(!u2.cursor_blinking);
     }
 
     #[test]
