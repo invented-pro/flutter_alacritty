@@ -104,9 +104,18 @@ Environment: `DISPLAY=:0` (display available).
   `TerminalConfig.defaults()` is now the single source for the default font (it already held the
   identical values); the dead constants are gone (deviates from the spec's "retain as source" wording
   in favor of the cleaner library-boundary choice — config owns the default).
-- **Left as deferred:** `mirror_grid.dart` initial empty-fill `0xD8D8D8/0x181818` and the cursor
-  out-of-bounds fallback color (`terminal_painter.dart`) — both degenerate/one-frame, covered by the
-  config-driven `Scaffold` background; not worth threading config into the render layer now.
+- **Follow-up bug (user-reported) — themed background showed stale color bands.** `MirrorGrid`'s
+  empty-cell fill was hardcoded `0xD8D8D8/0x181818`. Untouched rows get no partial damage from the
+  engine, so with a custom background those rows kept the old default until a full snapshot (e.g. a
+  click starting a selection) repainted them — visible as mismatched bands at startup, "fixed" by
+  clicking. Initially mis-deferred as one-frame/cosmetic; it is not (the engine never re-sends
+  untouched rows). Fixed: `MirrorGrid({defaultFg, defaultBg})` (v1 values as defaults) fed the
+  configured colors by `TerminalScreen`; regression test in `mirror_grid_test.dart`.
+- **Left as deferred:** cursor out-of-bounds fallback color (`terminal_painter.dart`) — only the
+  degenerate sub-frame where the cursor sits outside the grid; not a themeable surface.
+- **Flake note:** one isolated test failure was seen once during this pass, then 4 consecutive clean
+  79/79 runs. Timing-sensitive (likely the lifecycle async exit/restart or a glyph-warmup frame),
+  unrelated to the config change — worth a future look if it recurs.
 
 ## Spec coverage
 
