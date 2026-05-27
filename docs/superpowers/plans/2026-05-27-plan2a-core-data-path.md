@@ -1,8 +1,10 @@
 # Plan 2A — Core Data Path Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]` / `- [x]`) syntax for tracking.
 
 **Goal:** Make the engine↔Dart data path production-grade — parse off the UI isolate with per-frame coalescing, transfer only damaged lines, wire the terminal→host event back-channel, and render via a glyph cache — so heavy output stays smooth and terminal queries get answered.
+
+**Progress (2026-05-27):** Tasks 1–10 complete on branch `feature/plan2a-core-data-path`. See `2026-05-27-plan2a-findings.md`.
 
 **Architecture:** Rust gains a testable `EventProxy` (replacing `NoopListener`) that pushes into an engine-owned event queue, a `take_damage()` built on `term.damage()`/`reset_damage()`, and `RenderUpdate`/`LineUpdate` types. FRB exposes async `engine_advance`/`engine_take_damage`, plus sync `engine_new`, `engine_full_snapshot`, and `engine_take_events`. Dart gains a mutable `MirrorGrid`, a `GlyphCache`, and a `TerminalEngineClient` that coalesces PTY bytes per frame (with a re-entrancy flag for backpressure) and, each frame, drains damage + events and routes them.
 
@@ -44,7 +46,7 @@
 **Files:**
 - Modify: `rust/src/engine.rs`
 
-- [ ] **Step 1: Replace the existing engine tests' snapshot helper + add the line-based assertions (failing)**
+- [x] **Step 1: Replace the existing engine tests' snapshot helper + add the line-based assertions (failing)**
 
 In `rust/src/engine.rs`, replace the whole `#[cfg(test)] mod tests { ... }` block with:
 ```rust
@@ -107,12 +109,12 @@ mod tests {
 ```
 (`TerminalEngine::new(cols, rows)` keeps its existing signature — the event queue is created internally in Task 2; Task 1 leaves the listener untouched.)
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd rust && cargo test engine 2>&1 | tail -20`
 Expected: FAIL — `RenderUpdate`/`LineUpdate`/`full_snapshot`/`columns` not found; `new` arity mismatch.
 
-- [ ] **Step 3: Add the types, the `line_cells` helper, and `full_snapshot`**
+- [x] **Step 3: Add the types, the `line_cells` helper, and `full_snapshot`**
 
 In `rust/src/engine.rs`, **remove** the `RenderSnapshot` struct and the `snapshot()` method, and add:
 ```rust
@@ -179,12 +181,12 @@ pub fn full_snapshot(&self) -> RenderUpdate {
 ```
 Remove the now-unused `Point` import if the compiler warns (snapshot's `display_iter` loop is gone). Keep `Dimensions` import (used by `columns()`/`screen_lines()`).
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd rust && cargo test engine 2>&1 | tail -20`
 Expected: `test result: ok. 4 passed`. (`new(cols, rows)` is unchanged; the listener is still `NoopListener` until Task 2.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/hhoa/git/hhoa/flutter_alacritty/.worktrees/tracer-bullet
@@ -200,7 +202,7 @@ git commit -m "refactor(rust): RenderUpdate/LineUpdate + full_snapshot"
 - Create: `rust/src/event_proxy.rs`
 - Modify: `rust/src/engine.rs`, `rust/src/lib.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `rust/src/event_proxy.rs`:
 ```rust
@@ -283,12 +285,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd rust && cargo test event_proxy 2>&1 | tail -20`
 Expected: FAIL — module not declared (`event_proxy` unknown).
 
-- [ ] **Step 3: Wire the module and the engine**
+- [x] **Step 3: Wire the module and the engine**
 
 In `rust/src/lib.rs` add: `mod event_proxy;`
 
@@ -321,12 +323,12 @@ pub fn take_events(&self) -> Vec<EngineEvent> {
 }
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd rust && cargo test 2>&1 | tail -20`
 Expected: `event_proxy` 2 tests pass and `engine` 4 tests still pass (6 total).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/src/event_proxy.rs rust/src/engine.rs rust/src/lib.rs
@@ -340,7 +342,7 @@ git commit -m "feat(rust): testable EventProxy + EngineEvent back-channel"
 **Files:**
 - Modify: `rust/src/engine.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to the `tests` module in `rust/src/engine.rs`:
 ```rust
@@ -381,12 +383,12 @@ fn dsr_emits_pty_write() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd rust && cargo test engine 2>&1 | tail -25`
 Expected: FAIL — `no method named take_damage`.
 
-- [ ] **Step 3: Implement `take_damage`**
+- [x] **Step 3: Implement `take_damage`**
 
 Add to `impl TerminalEngine` and add the import `use alacritty_terminal::term::TermDamage;` at the top (alongside the existing `term::{Config, Term, TermMode}` — extend it to `term::{Config, Term, TermDamage, TermMode}`):
 ```rust
@@ -420,12 +422,12 @@ pub fn take_damage(&mut self) -> RenderUpdate {
 }
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd rust && cargo test 2>&1 | tail -20`
 Expected: all engine + event_proxy tests pass (9 total).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/src/engine.rs
@@ -441,7 +443,7 @@ git commit -m "feat(rust): take_damage() incremental render updates"
 - Test: `test/engine_bindings_test.dart`
 - Generated: `lib/src/rust/**`, `rust/src/frb_generated.rs`
 
-- [ ] **Step 1: Rewrite the FRB surface**
+- [x] **Step 1: Rewrite the FRB surface**
 
 Replace the contents of `rust/src/api/terminal.rs` with:
 ```rust
@@ -484,7 +486,7 @@ pub fn engine_resize(engine: &mut TerminalEngine, columns: u16, rows: u16) {
 ```
 > `catch_unwind` is a defensive boundary; vte is designed not to panic on malformed input, so there is no reliable panicking fixture to unit-test — the wrapper guarantees survival regardless.
 
-- [ ] **Step 2: Run codegen**
+- [x] **Step 2: Run codegen**
 
 Run:
 ```bash
@@ -493,7 +495,7 @@ flutter_rust_bridge_codegen generate
 ```
 Expected: regenerates `lib/src/rust/api/terminal.dart` (with `engineNew`, async `engineAdvance`/`engineTakeDamage`, `engineTakeEvents`, `engineFullSnapshot`, `engineResize`) and `lib/src/rust/event_proxy.dart` (with `EngineEvent` sealed class + variants `EngineEvent_PtyWrite`/`EngineEvent_Title`/…) and `RenderUpdate`/`LineUpdate`. No errors.
 
-- [ ] **Step 3: Update the FFI binding test to the polling API**
+- [x] **Step 3: Update the FFI binding test to the polling API**
 
 Replace the `test(...)` in `test/engine_bindings_test.dart` (keep the `_findOrBuildLib`/`setUpAll` from the tracer-bullet fix; add `import 'package:flutter_alacritty/src/rust/event_proxy.dart';`) with:
 ```dart
@@ -514,7 +516,7 @@ Replace the `test(...)` in `test/engine_bindings_test.dart` (keep the `_findOrBu
 ```
 > The exact generated variant class name (`EngineEvent_PtyWrite` vs `EngineEventPtyWrite`) depends on FRB's enum codegen — confirm in `lib/src/rust/event_proxy.dart` after Step 2 and adjust the `whereType<>` accordingly.
 
-- [ ] **Step 4: Build the lib and run the binding test**
+- [x] **Step 4: Build the lib and run the binding test**
 
 Run:
 ```bash
@@ -523,7 +525,7 @@ flutter test test/engine_bindings_test.dart
 ```
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/src/api/terminal.rs rust/src/frb_generated.rs lib/src/rust test/engine_bindings_test.dart
@@ -538,7 +540,7 @@ git commit -m "feat(frb): async advance/take_damage + polled EngineEvent via tak
 - Rewrite: `lib/render/mirror_grid.dart`
 - Test: `test/mirror_grid_test.dart`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Replace `test/mirror_grid_test.dart` with:
 ```dart
@@ -582,12 +584,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `flutter test test/mirror_grid_test.dart`
 Expected: FAIL — `LineCells`/`GridUpdate`/`apply` not found.
 
-- [ ] **Step 3: Rewrite MirrorGrid**
+- [x] **Step 3: Rewrite MirrorGrid**
 
 Replace `lib/render/mirror_grid.dart` with:
 ```dart
@@ -678,12 +680,12 @@ class MirrorGrid extends ChangeNotifier {
 }
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `flutter test test/mirror_grid_test.dart`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/render/mirror_grid.dart test/mirror_grid_test.dart
@@ -698,7 +700,7 @@ git commit -m "feat(render): mutable MirrorGrid with incremental apply()"
 - Create: `lib/render/glyph_cache.dart`
 - Test: `test/glyph_cache_test.dart`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `test/glyph_cache_test.dart`:
 ```dart
@@ -726,12 +728,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `flutter test test/glyph_cache_test.dart`
 Expected: FAIL — `glyph_cache.dart`/`GlyphCache` not found.
 
-- [ ] **Step 3: Implement GlyphCache**
+- [x] **Step 3: Implement GlyphCache**
 
 Create `lib/render/glyph_cache.dart`:
 ```dart
@@ -789,12 +791,12 @@ class GlyphCache {
 }
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `flutter test test/glyph_cache_test.dart`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/render/glyph_cache.dart test/glyph_cache_test.dart
@@ -809,7 +811,7 @@ git commit -m "feat(render): LRU glyph cache of pre-laid-out paragraphs"
 - Create: `lib/render/cell_metrics.dart`
 - Modify: `lib/render/terminal_painter.dart`
 
-- [ ] **Step 1: Create sub-pixel CellMetrics**
+- [x] **Step 1: Create sub-pixel CellMetrics**
 
 Create `lib/render/cell_metrics.dart`:
 ```dart
@@ -832,7 +834,7 @@ class CellMetrics {
 }
 ```
 
-- [ ] **Step 2: Rewrite the painter to use the cache + mutable grid**
+- [x] **Step 2: Rewrite the painter to use the cache + mutable grid**
 
 Replace `lib/render/terminal_painter.dart` with:
 ```dart
@@ -895,12 +897,12 @@ class TerminalPainter extends CustomPainter {
 ```
 > `CellMetrics` is now in `cell_metrics.dart`; the painter no longer defines it.
 
-- [ ] **Step 3: Verify analysis**
+- [x] **Step 3: Verify analysis**
 
 Run: `flutter analyze lib/render`
 Expected: No issues (it will report errors in `terminal_screen.dart` still importing the old `CellMetrics` from the painter — fixed in Task 9; analyze just `lib/render` here).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add lib/render/cell_metrics.dart lib/render/terminal_painter.dart
@@ -916,7 +918,7 @@ git commit -m "feat(render): sub-pixel CellMetrics + glyph-cached painter"
 - Create: `lib/engine/terminal_engine_client.dart`
 - Test: `test/engine_client_test.dart`
 
-- [ ] **Step 1: Define the EngineBinding seam**
+- [x] **Step 1: Define the EngineBinding seam**
 
 Create `lib/engine/engine_binding.dart`:
 ```dart
@@ -938,7 +940,7 @@ abstract class EngineBinding {
 }
 ```
 
-- [ ] **Step 2: Write the failing coalescing test**
+- [x] **Step 2: Write the failing coalescing test**
 
 Create `test/engine_client_test.dart`:
 ```dart
@@ -994,12 +996,12 @@ void main() {
 }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `flutter test test/engine_client_test.dart`
 Expected: FAIL — `terminal_engine_client.dart`/`TerminalEngineClient` not found.
 
-- [ ] **Step 4: Implement the client**
+- [x] **Step 4: Implement the client**
 
 Create `lib/engine/terminal_engine_client.dart`:
 ```dart
@@ -1064,12 +1066,12 @@ class TerminalEngineClient {
 }
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `flutter test test/engine_client_test.dart`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/engine/engine_binding.dart lib/engine/terminal_engine_client.dart test/engine_client_test.dart
@@ -1084,7 +1086,7 @@ git commit -m "feat(engine): per-frame coalescing client with backpressure"
 - Modify: `lib/engine/engine_binding.dart` (add `FrbEngineBinding`)
 - Rewrite: `lib/ui/terminal_screen.dart`
 
-- [ ] **Step 1: Implement the FRB-backed binding + event routing**
+- [x] **Step 1: Implement the FRB-backed binding + event routing**
 
 Append to `lib/engine/engine_binding.dart`:
 ```dart
@@ -1166,7 +1168,7 @@ class FrbEngineBinding implements EngineBinding {
 ```
 > The `rows`/`columns` derivation for the `full` path uses the engine's reported lines; for incremental updates the `MirrorGrid` keeps its existing size (`apply` only resizes on `full`). Confirm the generated `EngineEvent_*` variant class names and the `field0` accessor in `lib/src/rust/event_proxy.dart` (Task 4 Step 2) and adjust the `is`-checks if FRB names them differently.
 
-- [ ] **Step 2: Rewrite TerminalScreen to host the client**
+- [x] **Step 2: Rewrite TerminalScreen to host the client**
 
 Replace `lib/ui/terminal_screen.dart` with:
 ```dart
@@ -1298,7 +1300,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 }
 ```
 
-- [ ] **Step 3: Verify analysis + full test suite**
+- [x] **Step 3: Verify analysis + full test suite**
 
 Run:
 ```bash
@@ -1307,7 +1309,7 @@ flutter test
 ```
 Expected: analyze clean; all Dart tests pass (mirror_grid, glyph_cache, engine_client, key_input, engine_bindings, widget placeholder).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add lib/engine/engine_binding.dart lib/ui/terminal_screen.dart
@@ -1321,27 +1323,27 @@ git commit -m "feat: route events + wire coalescing client into TerminalScreen"
 **Files:**
 - Create: `docs/superpowers/plans/2026-05-27-plan2a-findings.md`
 
-- [ ] **Step 1: Build and run on Linux**
+- [x] **Step 1: Build and run on Linux**
 
 Run:
 ```bash
 flutter run -d linux
 ```
 
-- [ ] **Step 2: Walk the acceptance checklist** (record pass/fail)
-- [ ] `cat` a large file / `yes | head -n 100000` — UI stays responsive, no freeze, Ctrl-C still interrupts.
-- [ ] `vim` scroll + `htop` — smooth, no jank.
-- [ ] Query path: `printf '\e[6n'; read -r -d R x; echo "$x" | cat -v` returns a `[row;colR` cursor report (PtyWrite back-channel works); or `vim` opens cleanly (issues DA).
-- [ ] `printf '\e]0;hi\a'` — window title becomes "hi".
-- [ ] `printf '\a'` — bell hook fires (logged/flash).
-- [ ] OSC52 copy lands in the system clipboard.
-- [ ] Full-width ruler `printf '%*s\n' "$(tput cols)" '' | tr ' ' '-'` aligns to the right edge (cols correct). Record whether the earlier right-edge artifact is gone.
+- [x] **Step 2: Walk the acceptance checklist** (record pass/fail)
+- [x] `cat` a large file / `yes | head -n 100000` — UI stays responsive, no freeze, Ctrl-C still interrupts.
+- [x] `vim` scroll + `htop` — smooth, no jank.
+- [x] Query path: `printf '\e[6n'; read -r -d R x; echo "$x" | cat -v` returns a `[row;colR` cursor report (PtyWrite back-channel works); or `vim` opens cleanly (issues DA).
+- [x] `printf '\e]0;hi\a'` — window title becomes "hi".
+- [x] `printf '\a'` — bell hook fires (logged/flash).
+- [x] OSC52 copy lands in the system clipboard.
+- [x] Full-width ruler `printf '%*s\n' "$(tput cols)" '' | tr ' ' '-'` aligns to the right edge (cols correct). Record whether the earlier right-edge artifact is gone.
 
-- [ ] **Step 3: Record findings + Plan-2B inputs**
+- [x] **Step 3: Record findings + Plan-2B inputs**
 
 Create `docs/superpowers/plans/2026-05-27-plan2a-findings.md` capturing: checklist results; observed heavy-output smoothness (subjective/jank); whether `engine_advance`+`engine_take_damage` two-hop cost is noticeable; cols-artifact outcome; any FRB sink/stream signature adjustments made vs this plan; any `alacritty_terminal` API deltas; carry-over notes for sub-projects B/C.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-05-27-plan2a-findings.md
