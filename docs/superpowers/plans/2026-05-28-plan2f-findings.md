@@ -120,9 +120,12 @@ Environment: `DISPLAY=:0` (display available).
   that fills the cell. Fed from `_config.font.lineHeight`. User-verified aligned.
 - **Left as deferred:** cursor out-of-bounds fallback color (`terminal_painter.dart`) — only the
   degenerate sub-frame where the cursor sits outside the grid; not a themeable surface.
-- **Flake note:** one isolated test failure was seen once during this pass, then 4 consecutive clean
-  79/79 runs. Timing-sensitive (likely the lifecycle async exit/restart or a glyph-warmup frame),
-  unrelated to the config change — worth a future look if it recurs.
+- **"Flake" was a stale native lib (not a timing flake).** `engine_bindings_test` intermittently
+  panicked in the FRB SSE deserializer (`engine_new` decode, `left: 84 right: 4`) — the Dart bindings
+  send the new 3-arg `engine_new(cols, rows, config)` (18-color palette ≈ 84 bytes) but a prebuilt
+  `librust_lib_flutter_alacritty.so` predating the `EngineConfig` change still decoded the old 2-arg
+  form. **Resolution: rebuild native (`flutter build linux --debug`) after any Rust/FRB change before
+  `flutter test`** — `flutter test` does not rebuild the dylib. After rebuild: 79/79, 3/3 runs clean.
 
 ## Spec coverage
 
