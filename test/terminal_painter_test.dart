@@ -13,13 +13,21 @@ class _RecordingGlyphCache extends GlyphCache {
       : super(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
   final List<(int, bool)> calls = [];
   @override
-  ui.Paragraph? tryGet(int codepoint, int fg, {bool wide = false}) {
+  ui.Paragraph? tryGet(int codepoint, int fg,
+      {bool bold = false, bool italic = false, bool wide = false}) {
     calls.add((codepoint, wide));
-    return super.tryGet(codepoint, fg, wide: wide);
+    return super.tryGet(codepoint, fg, bold: bold, italic: italic, wide: wide);
   }
 }
 
 void main() {
+  test('underline sits near the bottom, strikeout near the middle', () {
+    final ys = decorationYs(0.0, 20.0);
+    expect(ys.underline, greaterThan(15.0));
+    expect(ys.underline, lessThanOrEqualTo(20.0));
+    expect(ys.strikeout, closeTo(10.0, 2.0));
+  });
+
   testWidgets('draws wide glyph once and skips the spacer column', (tester) async {
     final grid = MirrorGrid();
     // Row "中X": col0 = wide '中', col1 = spacer carrying a stray 'X'.
