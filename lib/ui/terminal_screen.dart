@@ -33,7 +33,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
   );
 
   final MirrorGrid _grid = MirrorGrid();
+  final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
+  Timer? _blinkTimer;
   final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _blinkTimer = Timer.periodic(const Duration(milliseconds: 530), (_) {
+      _blinkOn.value = !_blinkOn.value;
+    });
+  }
 
   TerminalEngineClient? _client;
   PtyBackend? _pty;
@@ -91,6 +101,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   void dispose() {
+    _blinkTimer?.cancel();
+    _blinkOn.dispose();
     _outputSub?.cancel();
     _pty?.kill();
     _client?.dispose();
@@ -121,6 +133,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   glyphs: _glyphs,
                   cellWidth: _metrics.width,
                   cellHeight: _metrics.height,
+                  blinkOn: _blinkOn,
                 ),
               ),
             ),
