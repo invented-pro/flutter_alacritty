@@ -187,8 +187,14 @@ class _TerminalScreenState extends State<TerminalScreen> {
                 _focus.requestFocus();
                 _reportMouse(e.localPosition, _btn(e.buttons), MouseAction.down);
               },
-              onPointerMove: (e) =>
-                  _reportMouse(e.localPosition, _btn(e.buttons), MouseAction.move),
+              onPointerMove: (e) {
+                // DRAG (1002): only report move while a button is held; bare hover
+                // needs MOTION (1003), which is not wired yet.
+                if (e.buttons == 0 && (_grid.modeFlags & kModeMouseMotion) == 0) {
+                  return;
+                }
+                _reportMouse(e.localPosition, _btn(e.buttons), MouseAction.move);
+              },
               onPointerUp: (e) =>
                   _reportMouse(e.localPosition, 0, MouseAction.up),
               onPointerSignal: (e) {
