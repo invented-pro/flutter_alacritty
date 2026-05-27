@@ -142,19 +142,48 @@ class TerminalPainter extends CustomPainter {
     // Pass 3: cursor.
     final blinkVisible = !grid.cursorBlinking || blinkOn.value;
     if (grid.cursorVisible && grid.cursorShape != 4 && blinkVisible) {
-      final onWide = grid.cursorRow < rows &&
-          grid.cursorCol < cols &&
-          grid.flagsAt(grid.cursorRow, grid.cursorCol) & kFlagWide != 0;
+      final cr = grid.cursorRow, cc = grid.cursorCol;
+      final inBounds = cr < rows && cc < cols;
+      final flags = inBounds ? grid.flagsAt(cr, cc) : 0;
+      final onWide = flags & kFlagWide != 0;
       final cw = onWide ? cellWidth * 2 : cellWidth;
-      final base = cursorRect(grid.cursorShape, cw, cellHeight, lineWidth)
-          .translate(grid.cursorCol * cellWidth, grid.cursorRow * cellHeight);
-      final paint = Paint()..color = const Color(0x88FFFFFF);
-      if (grid.cursorShape == 3) {
-        paint
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = lineWidth;
+      final x = cc * cellWidth, y = cr * cellHeight;
+      // Cursor ink = the cell's effective fg (an inverse cursor); the glyph is
+      // redrawn in the effective bg so a block cursor reads as a true inversion.
+      final ec = inBounds
+          ? effectiveColors(flags, grid.fgAt(cr, cc), grid.bgAt(cr, cc))
+          : (fg: 0xD8D8D8, bg: 0x181818);
+      final inkColor = Color(0xFF000000 | ec.fg);
+      final shape = grid.cursorShape;
+      if (shape == 0) {
+        // Block: fill with ink, redraw the cell content in the bg color on top.
+        canvas.drawRect(Rect.fromLTWH(x, y, cw, cellHeight), Paint()..color = inkColor);
+        final cp = inBounds ? grid.codepointAt(cr, cc) : 32;
+        if (cp != 32 && cp != 0) {
+          final r = Rect.fromLTWH(x, y, cw, cellHeight);
+          final bgInk = Color(0xFF000000 | ec.bg);
+          if (!(isBoxDrawing(cp) && paintBoxGlyph(canvas, r, cp, bgInk, lineWidth))) {
+            final g = glyphs.tryGet(cp, ec.bg,
+                bold: flags & kFlagBold != 0,
+                italic: flags & kFlagItalic != 0,
+                wide: onWide);
+            if (g != null) canvas.drawParagraph(g, Offset(x, y));
+          }
+        }
+      } else if (shape == 3) {
+        // Hollow: stroke the cell outline in the ink color.
+        canvas.drawRect(
+          Rect.fromLTWH(x, y, cw, cellHeight),
+          Paint()
+            ..color = inkColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = lineWidth,
+        );
+      } else {
+        // Beam (2) / underline (1): a solid ink-colored bar.
+        final bar = cursorRect(shape, cw, cellHeight, lineWidth).translate(x, y);
+        canvas.drawRect(bar, Paint()..color = inkColor);
       }
-      canvas.drawRect(base, paint);
     }
   }
 
