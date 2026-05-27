@@ -59,7 +59,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
   int _clickCount = 0;
   DateTime _lastClick = DateTime.fromMillisecondsSinceEpoch(0);
   bool _selecting = false;
-  // ignore: unused_field
   String _primary = '';
 
   // Repaint is driven by CustomPaint(repaint: _grid): MirrorGrid.apply() notifies,
@@ -232,6 +231,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   _client!.binding.selectionStart(r, c, rh, _clickCount - 1);
                   _selecting = true;
                   _refreshSelection();
+                  return;
+                }
+                if (!anyMouse(_grid.modeFlags) &&
+                    e.buttons & kMiddleMouseButton != 0 &&
+                    _primary.isNotEmpty) {
+                  _pty?.write(pasteBytes(_primary, modeFlags: _grid.modeFlags));
                   return;
                 }
                 _pressedButton = _btn(e.buttons);
