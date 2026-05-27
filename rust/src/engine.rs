@@ -4,7 +4,7 @@ use crate::event_proxy::{EngineEvent, EventProxy, EventQueue};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config, Term, TermMode};
+use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, Rgb};
 
 /// Flat, FFI-friendly cell. fg/bg are packed 0x00RRGGBB.
@@ -165,7 +165,9 @@ impl TerminalEngine {
             rows as usize,
         );
         let events: EventQueue = Arc::new(Mutex::new(Vec::new()));
-        let term = Term::new(Config::default(), &size, EventProxy::new(events.clone()));
+        let mut term = Term::new(Config::default(), &size, EventProxy::new(events.clone()));
+        // Term boots with `damage.full`; clear so the first `take_damage` after input is partial.
+        term.reset_damage();
         TerminalEngine {
             term,
             parser: Processor::new(),
@@ -234,6 +236,43 @@ impl TerminalEngine {
         }
     }
 
+    pub fn take_damage(&mut self) -> RenderUpdate {
+        // Collect damaged viewport rows, then drop the borrow before reading cells.
+        let damaged: Option<Vec<usize>> = match self.term.damage() {
+            TermDamage::Full => None,
+            TermDamage::Partial(it) => Some(it.map(|b| b.line).collect()),
+        };
+        self.term.reset_damage();
+
+        let (cursor_line, cursor_col, cursor_visible) = self.cursor_fields();
+        match damaged {
+            None => {
+                let mut u = self.full_snapshot();
+                u.cursor_line = cursor_line;
+                u.cursor_col = cursor_col;
+                u.cursor_visible = cursor_visible;
+                u
+            }
+            Some(mut rows) => {
+                rows.sort_unstable();
+                rows.dedup();
+                let lines = rows
+                    .into_iter()
+                    .map(|row| LineUpdate {
+                        line: row as u32,
+                        cells: self.line_cells(row),
+                    })
+                    .collect();
+                RenderUpdate {
+                    lines,
+                    full: false,
+                    cursor_line,
+                    cursor_col,
+                    cursor_visible,
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -292,4 +331,54 @@ mod tests {
         assert_eq!(line(&u, 0).cells.len(), 40);
     }
 
+    #[test]
+    fn damage_reports_only_changed_lines_then_resets() {
+        let mut e = engine(20, 5);
+        e.advance(b"hi".to_vec());
+        let u = e.take_damage();
+        assert!(!u.full);
+        assert!(u.lines.iter().any(|l| l.line == 0));
+        assert_eq!(
+            char::from_u32(
+                u.lines
+                    .iter()
+                    .find(|l| l.line == 0)
+                    .unwrap()
+                    .cells[0]
+                    .codepoint
+            )
+            .unwrap(),
+            'h'
+        );
+        // Second read after reset: no new cell writes; alacritty_terminal may still
+        // report cursor-cell damage from `damage()` (at most one line).
+        let u2 = e.take_damage();
+        assert!(!u2.full);
+        assert!(u2.lines.len() <= 1);
+    }
+
+    #[test]
+    fn resize_forces_full_damage() {
+        let mut e = engine(20, 5);
+        e.take_damage(); // drain initial
+        e.resize(30, 6);
+        let u = e.take_damage();
+        assert!(u.full);
+        assert_eq!(u.lines.len(), 6);
+    }
+
+    #[test]
+    fn dsr_emits_pty_write() {
+        use crate::event_proxy::EngineEvent;
+        let mut e = engine(20, 5);
+        e.advance(b"\x1b[6n".to_vec()); // DSR: report cursor position
+        let events = e.take_events();
+        assert!(
+            events
+                .iter()
+                .any(|ev| matches!(ev, EngineEvent::PtyWrite(b) if b.starts_with(b"\x1b["))),
+            "expected a PtyWrite cursor report, got {:?}",
+            events
+        );
+    }
 }
