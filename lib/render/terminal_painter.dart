@@ -7,16 +7,6 @@ import 'cell_flags.dart';
 import 'glyph_cache.dart';
 import 'mirror_grid.dart';
 
-/// System monospace from `fc-match monospace`; CJK via Noto/WenQuanYi mono.
-const kTerminalFontFamily = 'DejaVu Sans Mono';
-
-const kTerminalTextStyle = TextStyle(
-  fontFamily: kTerminalFontFamily,
-  fontFamilyFallback: ['Noto Sans Mono CJK SC', 'WenQuanYi Zen Hei Mono', 'monospace'],
-  fontSize: 14,
-  height: 1.2,
-);
-
 /// Packed-RGB fg/bg after applying inverse (swap) and dim (darken fg).
 ({int fg, int bg}) effectiveColors(int flags, int rawFg, int rawBg) {
   var fg = rawFg, bg = rawBg;

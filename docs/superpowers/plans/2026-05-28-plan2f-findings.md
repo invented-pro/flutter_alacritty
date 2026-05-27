@@ -92,6 +92,22 @@ Environment: `DISPLAY=:0` (display available).
 4. **cargokit analyze noise** — `rust_builder/cargokit/build_tool/` errors pollute full-tree `flutter analyze`; fix or exclude in analysis_options.
 5. **Interactive manual sign-off** — visually confirm blink interval, line-height spacing, and scroll multiplier with a custom on-disk config (automated tests cover the data path).
 
+## Post-review fixes (code review, 2026-05-28)
+
+- **Critical — `integration_test/simple_test.dart` no longer compiled.** Making `MyApp.config`
+  required broke `const MyApp()`, and full-tree `flutter analyze` failed (the original findings only
+  ran `analyze lib/ test/`, missing `integration_test/`). The test was also stale FRB-template code
+  asserting `Result: Hello, Tom!`. Repurposed it into a real boot smoke test:
+  `MyApp(config: TerminalConfig.defaults())` → expect a `TerminalScreen`. `flutter analyze lib/ test/
+  integration_test/` is now clean; `flutter test` 77/77.
+- **Minor — orphaned `kTerminalTextStyle` / `kTerminalFontFamily`** removed from `terminal_painter.dart`.
+  `TerminalConfig.defaults()` is now the single source for the default font (it already held the
+  identical values); the dead constants are gone (deviates from the spec's "retain as source" wording
+  in favor of the cleaner library-boundary choice — config owns the default).
+- **Left as deferred:** `mirror_grid.dart` initial empty-fill `0xD8D8D8/0x181818` and the cursor
+  out-of-bounds fallback color (`terminal_painter.dart`) — both degenerate/one-frame, covered by the
+  config-driven `Scaffold` background; not worth threading config into the render layer now.
+
 ## Spec coverage
 
 - §3 schema → `fromTomlString` + `flutter_alacritty.toml.example` ✅
