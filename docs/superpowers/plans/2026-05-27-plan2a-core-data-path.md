@@ -4,7 +4,9 @@
 
 **Goal:** Make the engine↔Dart data path production-grade — parse off the UI isolate with per-frame coalescing, transfer only damaged lines, wire the terminal→host event back-channel, and render via a glyph cache — so heavy output stays smooth and terminal queries get answered.
 
-**Architecture:** Rust gains a testable `EventProxy` (replacing `NoopListener`), a `take_damage()` built on `term.damage()`/`reset_damage()`, and `RenderUpdate`/`LineUpdate` types. FRB exposes async `engine_advance`/`engine_take_damage`, `engine_new(sink)`, `engine_full_snapshot`, and an `EngineEvent` stream. Dart gains a mutable `MirrorGrid`, a `GlyphCache`, and a `TerminalEngineClient` that coalesces PTY bytes per frame (with a re-entrancy flag for backpressure) and routes events.
+**Architecture:** Rust gains a testable `EventProxy` (replacing `NoopListener`) that pushes into an engine-owned event queue, a `take_damage()` built on `term.damage()`/`reset_damage()`, and `RenderUpdate`/`LineUpdate` types. FRB exposes async `engine_advance`/`engine_take_damage`, plus sync `engine_new`, `engine_full_snapshot`, and `engine_take_events`. Dart gains a mutable `MirrorGrid`, a `GlyphCache`, and a `TerminalEngineClient` that coalesces PTY bytes per frame (with a re-entrancy flag for backpressure) and, each frame, drains damage + events and routes them.
+
+> **Events are polled per frame, not streamed.** Validation showed FRB's `StreamSink`-as-constructor-param is awkward and adds stream-lifecycle management; since the client already drains once per frame, events are drained the same way via `engine_take_events() -> Vec<EngineEvent>`. `PtyWrite` (DSR/DA responses) is delivered within one frame (~16 ms) — well within app tolerance. This removes the plan's only "confirm after codegen" unknown.
 
 **Tech Stack:** Rust (`alacritty_terminal` git-pinned, `flutter_rust_bridge` 2.12), Flutter 3.41 / Dart 3.11, `flutter_pty`.
 
@@ -17,9 +19,9 @@
 ## File Structure
 
 **Rust:**
-- `rust/src/engine.rs` — MODIFY: add `RenderUpdate`/`LineUpdate`; `line_cells()` helper; refactor `snapshot()`→`full_snapshot() -> RenderUpdate`; add `take_damage()`; `TerminalEngine::new` takes an event sink; `term: Term<EventProxy>`.
-- `rust/src/event_proxy.rs` — CREATE: `EngineEvent`, `EventProxy` (`Arc<dyn Fn(EngineEvent)>`), `Event`→`EngineEvent` mapping.
-- `rust/src/api/terminal.rs` — MODIFY: async `engine_advance`/`engine_take_damage`; `engine_new(sink)`; `engine_full_snapshot`; re-export new types.
+- `rust/src/engine.rs` — MODIFY: add `RenderUpdate`/`LineUpdate`; `line_cells()` helper; refactor `snapshot()`→`full_snapshot() -> RenderUpdate`; add `take_damage()`; engine owns an `Arc<Mutex<Vec<EngineEvent>>>` queue + `take_events()`; `term: Term<EventProxy>`.
+- `rust/src/event_proxy.rs` — CREATE: `EngineEvent`, `EventProxy` (holds `Arc<Mutex<Vec<EngineEvent>>>`), `Event`→`EngineEvent` mapping (pushes into the queue).
+- `rust/src/api/terminal.rs` — MODIFY: async `engine_advance`/`engine_take_damage`; sync `engine_new(columns, rows)`, `engine_full_snapshot`, `engine_take_events`; re-export new types.
 - `rust/src/lib.rs` — MODIFY: `mod event_proxy;`.
 
 **Dart:**
@@ -51,7 +53,7 @@ mod tests {
     use super::*;
 
     fn engine(cols: u16, rows: u16) -> TerminalEngine {
-        TerminalEngine::new(cols, rows, |_| {})
+        TerminalEngine::new(cols, rows)
     }
 
     fn line<'a>(u: &'a RenderUpdate, row: u32) -> &'a LineUpdate {
@@ -103,7 +105,7 @@ mod tests {
     }
 }
 ```
-(`TerminalEngine::new` now takes a sink closure — implemented in Task 2; this task uses `|_| {}`. To keep Task 1 self-contained, temporarily keep the old `new(cols, rows)` working by giving it a default in Step 3, then Task 2 adds the sink param. **Simpler: implement the sink param now** — see Step 3.)
+(`TerminalEngine::new(cols, rows)` keeps its existing signature — the event queue is created internally in Task 2; Task 1 leaves the listener untouched.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -180,7 +182,7 @@ Remove the now-unused `Point` import if the compiler warns (snapshot's `display_
 - [ ] **Step 4: Run to verify pass**
 
 Run: `cd rust && cargo test engine 2>&1 | tail -20`
-Expected: `test result: ok. 4 passed`. (`new` takes the sink closure now; if Task 2 not yet done, temporarily add the sink param per Task 2 Step 3, or this task and Task 2 may be committed together.)
+Expected: `test result: ok. 4 passed`. (`new(cols, rows)` is unchanged; the listener is still `NoopListener` until Task 2.)
 
 - [ ] **Step 5: Commit**
 
@@ -202,7 +204,7 @@ git commit -m "refactor(rust): RenderUpdate/LineUpdate + full_snapshot"
 
 Create `rust/src/event_proxy.rs`:
 ```rust
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::event::{Event, EventListener};
 
@@ -216,20 +218,22 @@ pub enum EngineEvent {
     ClipboardStore(String),
 }
 
-/// Bridges alacritty's `EventListener` to a host sink closure. Stateless and
-/// testable: production wires the closure to an FRB StreamSink; tests collect
-/// into a Vec.
+/// Shared, thread-safe event queue owned by the engine and filled by the proxy.
+pub type EventQueue = Arc<Mutex<Vec<EngineEvent>>>;
+
+/// Bridges alacritty's `EventListener` to the engine-owned queue. Testable:
+/// construct with a shared queue, advance the engine, then read the queue.
 #[derive(Clone)]
 pub struct EventProxy {
-    sink: Arc<dyn Fn(EngineEvent) + Send + Sync>,
+    queue: EventQueue,
 }
 
 impl EventProxy {
-    pub fn new(f: impl Fn(EngineEvent) + Send + Sync + 'static) -> Self {
-        Self { sink: Arc::new(f) }
+    pub fn new(queue: EventQueue) -> Self {
+        Self { queue }
     }
     fn emit(&self, e: EngineEvent) {
-        (self.sink)(e);
+        self.queue.lock().unwrap().push(e);
     }
 }
 
@@ -254,12 +258,10 @@ impl EventListener for EventProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    fn collector() -> (EventProxy, Arc<Mutex<Vec<EngineEvent>>>) {
-        let store = Arc::new(Mutex::new(Vec::new()));
-        let s = store.clone();
-        (EventProxy::new(move |e| s.lock().unwrap().push(e)), store)
+    fn collector() -> (EventProxy, EventQueue) {
+        let store: EventQueue = Arc::new(Mutex::new(Vec::new()));
+        (EventProxy::new(store.clone()), store)
     }
 
     #[test]
@@ -291,22 +293,33 @@ Expected: FAIL — module not declared (`event_proxy` unknown).
 In `rust/src/lib.rs` add: `mod event_proxy;`
 
 In `rust/src/engine.rs`:
-- Remove the `NoopListener` struct and its `impl EventListener`.
-- Change the field: `term: Term<crate::event_proxy::EventProxy>,`
-- Change `new` to take a sink closure:
+- Remove the `NoopListener` struct and its `impl EventListener`, and the now-unused `use alacritty_terminal::event::{Event, EventListener};` (it moved to `event_proxy.rs`).
+- Add imports and change the engine fields:
 ```rust
-pub fn new(
-    columns: u16,
-    rows: u16,
-    sink: impl Fn(crate::event_proxy::EngineEvent) + Send + Sync + 'static,
-) -> TerminalEngine {
-    let size = alacritty_terminal::term::test::TermSize::new(columns as usize, rows as usize);
-    let proxy = crate::event_proxy::EventProxy::new(sink);
-    let term = Term::new(Config::default(), &size, proxy);
-    TerminalEngine { term, parser: Processor::new() }
+use std::sync::{Arc, Mutex};
+use crate::event_proxy::{EngineEvent, EventProxy, EventQueue};
+
+pub struct TerminalEngine {
+    term: Term<EventProxy>,
+    parser: Processor,
+    events: EventQueue,
 }
 ```
-- Remove the now-unused `use alacritty_terminal::event::{Event, EventListener};` line from `engine.rs` (it moved to `event_proxy.rs`).
+- Change `new` to create the queue + proxy (signature stays `(columns, rows)`):
+```rust
+pub fn new(columns: u16, rows: u16) -> TerminalEngine {
+    let size = alacritty_terminal::term::test::TermSize::new(columns as usize, rows as usize);
+    let events: EventQueue = Arc::new(Mutex::new(Vec::new()));
+    let term = Term::new(Config::default(), &size, EventProxy::new(events.clone()));
+    TerminalEngine { term, parser: Processor::new(), events }
+}
+```
+- Add the drain method inside `impl TerminalEngine`:
+```rust
+pub fn take_events(&self) -> Vec<EngineEvent> {
+    std::mem::take(&mut *self.events.lock().unwrap())
+}
+```
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -357,16 +370,13 @@ fn resize_forces_full_damage() {
 
 #[test]
 fn dsr_emits_pty_write() {
-    use std::sync::{Arc, Mutex};
     use crate::event_proxy::EngineEvent;
-    let store = Arc::new(Mutex::new(Vec::new()));
-    let s = store.clone();
-    let mut e = TerminalEngine::new(20, 5, move |ev| s.lock().unwrap().push(ev));
+    let mut e = engine(20, 5);
     e.advance(b"\x1b[6n".to_vec()); // DSR: report cursor position
-    let events = store.lock().unwrap();
+    let events = e.take_events();
     assert!(
         events.iter().any(|ev| matches!(ev, EngineEvent::PtyWrite(b) if b.starts_with(b"\x1b["))),
-        "expected a PtyWrite cursor report, got {:?}", *events
+        "expected a PtyWrite cursor report, got {:?}", events
     );
 }
 ```
@@ -439,21 +449,27 @@ pub use crate::engine::{CellData, LineUpdate, RenderUpdate, TerminalEngine};
 pub use crate::event_proxy::EngineEvent;
 
 use flutter_rust_bridge::frb;
-use flutter_rust_bridge::StreamSink;
+use std::panic::AssertUnwindSafe;
 
 #[frb(sync)]
-pub fn engine_new(columns: u16, rows: u16, sink: StreamSink<EngineEvent>) -> TerminalEngine {
-    TerminalEngine::new(columns, rows, move |event| {
-        let _ = sink.add(event);
-    })
+pub fn engine_new(columns: u16, rows: u16) -> TerminalEngine {
+    TerminalEngine::new(columns, rows)
 }
 
 pub async fn engine_advance(engine: &mut TerminalEngine, bytes: Vec<u8>) {
-    engine.advance(bytes);
+    // §6 panic isolation: a malformed sequence must never abort the app.
+    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| engine.advance(bytes)));
 }
 
 pub async fn engine_take_damage(engine: &mut TerminalEngine) -> RenderUpdate {
-    engine.take_damage()
+    std::panic::catch_unwind(AssertUnwindSafe(|| engine.take_damage())).unwrap_or(
+        RenderUpdate { lines: Vec::new(), full: false, cursor_line: 0, cursor_col: 0, cursor_visible: false },
+    )
+}
+
+#[frb(sync)]
+pub fn engine_take_events(engine: &TerminalEngine) -> Vec<EngineEvent> {
+    engine.take_events()
 }
 
 #[frb(sync)]
@@ -466,6 +482,7 @@ pub fn engine_resize(engine: &mut TerminalEngine, columns: u16, rows: u16) {
     engine.resize(columns, rows);
 }
 ```
+> `catch_unwind` is a defensive boundary; vte is designed not to panic on malformed input, so there is no reliable panicking fixture to unit-test — the wrapper guarantees survival regardless.
 
 - [ ] **Step 2: Run codegen**
 
@@ -474,49 +491,30 @@ Run:
 cd /home/hhoa/git/hhoa/flutter_alacritty/.worktrees/tracer-bullet
 flutter_rust_bridge_codegen generate
 ```
-Expected: regenerates `lib/src/rust/api/terminal.dart` (with `engineNew`, async `engineAdvance`/`engineTakeDamage`, `engineFullSnapshot`, `engineResize`) and `lib/src/rust/event_proxy.dart` (with `EngineEvent` sealed class + variants) and `RenderUpdate`/`LineUpdate`. No errors.
+Expected: regenerates `lib/src/rust/api/terminal.dart` (with `engineNew`, async `engineAdvance`/`engineTakeDamage`, `engineTakeEvents`, `engineFullSnapshot`, `engineResize`) and `lib/src/rust/event_proxy.dart` (with `EngineEvent` sealed class + variants `EngineEvent_PtyWrite`/`EngineEvent_Title`/…) and `RenderUpdate`/`LineUpdate`. No errors.
 
-- [ ] **Step 3: Update the FFI binding test to the new API**
+- [ ] **Step 3: Update the FFI binding test to the polling API**
 
-Replace the `test(...)` body in `test/engine_bindings_test.dart` (keep the `_findOrBuildLib`/`setUpAll` from the tracer-bullet fix) with:
+Replace the `test(...)` in `test/engine_bindings_test.dart` (keep the `_findOrBuildLib`/`setUpAll` from the tracer-bullet fix; add `import 'package:flutter_alacritty/src/rust/event_proxy.dart';`) with:
 ```dart
-  test('engine new/advance/take_damage round-trips + emits events', () async {
-    final events = <EngineEvent>[];
-    final sub = <Object?>[];
-    final engine = engineNew(
-      columns: 20,
-      rows: 5,
-      sink: () {
-        // engineNew returns the engine; the events stream is the sink param.
-      }(),
-    );
-    // NOTE: see Step 4 for the correct sink/stream wiring; this test asserts
-    // the data round-trip:
+  test('advance + take_damage round-trips and DSR emits a PtyWrite event', () async {
+    final engine = engineNew(columns: 20, rows: 5);
+
     await engineAdvance(engine: engine, bytes: 'hi'.codeUnits);
     final u = await engineTakeDamage(engine: engine);
     final line0 = u.lines.firstWhere((l) => l.line == 0);
     expect(String.fromCharCode(line0.cells[0].codepoint), 'h');
     expect(String.fromCharCode(line0.cells[1].codepoint), 'i');
-    expect(events, isEmpty); // referenced to avoid unused warning
-    sub.clear();
+
+    // DSR cursor-position query → a PtyWrite event, drained by polling.
+    await engineAdvance(engine: engine, bytes: '\x1b[6n'.codeUnits);
+    final events = engineTakeEvents(engine: engine);
+    expect(events.whereType<EngineEvent_PtyWrite>(), isNotEmpty);
   });
 ```
-> The `sink` parameter shape FRB generates for a `StreamSink` arg is a `Stream` return on the Dart side via a paired API; confirm the exact generated signature after Step 2 and adjust the test to obtain the stream (commonly `engineNew(columns:, rows:)` returns the engine and the stream is delivered through the same call's generated `Stream` — inspect `lib/src/rust/api/terminal.dart`). The assertion on `take_damage` cells is the stable part.
+> The exact generated variant class name (`EngineEvent_PtyWrite` vs `EngineEventPtyWrite`) depends on FRB's enum codegen — confirm in `lib/src/rust/event_proxy.dart` after Step 2 and adjust the `whereType<>` accordingly.
 
-- [ ] **Step 4: Confirm the generated sink/stream signature and finalize the test**
-
-Run: `sed -n '1,60p' lib/src/rust/api/terminal.dart`
-Expected: shows the generated `engineNew` signature. If it returns `(TerminalEngine, Stream<EngineEvent>)` or takes no sink and instead exposes a separate stream, update the test to capture events:
-```dart
-    final (engine, events) = engineNew(columns: 20, rows: 5); // adapt to actual signature
-    final collected = <EngineEvent>[];
-    events.listen(collected.add);
-    await engineAdvance(engine: engine, bytes: '\x1b[6n'.codeUnits); // DSR
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-    expect(collected.whereType<EngineEvent_PtyWrite>(), isNotEmpty);
-```
-
-- [ ] **Step 5: Build the lib and run the binding test**
+- [ ] **Step 4: Build the lib and run the binding test**
 
 Run:
 ```bash
@@ -525,11 +523,11 @@ flutter test test/engine_bindings_test.dart
 ```
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add rust/src/api/terminal.rs rust/src/frb_generated.rs lib/src/rust test/engine_bindings_test.dart
-git commit -m "feat(frb): async advance/take_damage + EngineEvent stream"
+git commit -m "feat(frb): async advance/take_damage + polled EngineEvent via take_events"
 ```
 
 ---
@@ -932,6 +930,9 @@ import '../render/mirror_grid.dart';
 abstract class EngineBinding {
   Future<void> advance(Uint8List bytes);
   Future<GridUpdate> takeDamage();
+  /// Drain queued terminal→host events and dispatch them (PtyWrite/Title/…).
+  /// Kept on the binding so the client stays free of FRB event types.
+  void pumpEvents();
   void resize(int columns, int rows);
   void dispose();
 }
@@ -959,6 +960,8 @@ class _FakeBinding implements EngineBinding {
   Future<GridUpdate> takeDamage() async => GridUpdate(
       full: false, rows: 1, columns: 1, lines: const [],
       cursorRow: 0, cursorCol: 0, cursorVisible: true);
+  @override
+  void pumpEvents() {}
   @override
   void resize(int columns, int rows) {}
   @override
@@ -1048,6 +1051,7 @@ class TerminalEngineClient {
       await _binding.advance(batch);
       final update = await _binding.takeDamage();
       _grid.apply(update);
+      _binding.pumpEvents(); // route PtyWrite/Title/Bell/Clipboard for this batch
     } finally {
       _advancing = false;
     }
@@ -1084,31 +1088,28 @@ git commit -m "feat(engine): per-frame coalescing client with backpressure"
 
 Append to `lib/engine/engine_binding.dart`:
 ```dart
-import 'dart:async';
+import 'dart:typed_data';
 
 import '../src/rust/api/terminal.dart';
 import '../src/rust/event_proxy.dart';
 
 /// FRB-backed binding. Owns the engine handle, translates FRB [RenderUpdate]
-/// into native [GridUpdate], and exposes the terminal→host event stream.
+/// into native [GridUpdate], and dispatches polled terminal→host events.
 class FrbEngineBinding implements EngineBinding {
-  FrbEngineBinding({required int columns, required int rows})
-      : _engine = engineNew(columns: columns, rows: rows) {
-    // Adapt to the generated sink/stream signature (see Task 4 Step 4).
-  }
+  FrbEngineBinding({
+    required int columns,
+    required int rows,
+    required this.onPtyWrite,
+    required this.onTitle,
+    required this.onBell,
+    required this.onClipboard,
+  }) : _engine = engineNew(columns: columns, rows: rows);
 
   final TerminalEngine _engine;
-  StreamSubscription<EngineEvent>? _eventSub;
-
-  /// Wire terminal→host events. `onPtyWrite` must forward to the PTY.
-  void listenEvents({
-    required void Function(Uint8List) onPtyWrite,
-    required void Function(String) onTitle,
-    required void Function() onBell,
-    required void Function(String) onClipboard,
-  }) {
-    // _eventSub = <engine event stream from Task 4>.listen((e) { ... dispatch ... });
-  }
+  final void Function(Uint8List) onPtyWrite;
+  final void Function(String) onTitle;
+  final void Function() onBell;
+  final void Function(String) onClipboard;
 
   @override
   Future<void> advance(Uint8List bytes) => engineAdvance(engine: _engine, bytes: bytes);
@@ -1117,6 +1118,23 @@ class FrbEngineBinding implements EngineBinding {
   Future<GridUpdate> takeDamage() async =>
       _toGridUpdate(await engineTakeDamage(engine: _engine));
 
+  @override
+  void pumpEvents() {
+    for (final e in engineTakeEvents(engine: _engine)) {
+      if (e is EngineEvent_PtyWrite) {
+        onPtyWrite(Uint8List.fromList(e.field0));
+      } else if (e is EngineEvent_Title) {
+        onTitle(e.field0);
+      } else if (e is EngineEvent_ResetTitle) {
+        onTitle('flutter_alacritty');
+      } else if (e is EngineEvent_Bell) {
+        onBell();
+      } else if (e is EngineEvent_ClipboardStore) {
+        onClipboard(e.field0);
+      }
+    }
+  }
+
   GridUpdate fullSnapshot() => _toGridUpdate(engineFullSnapshot(engine: _engine));
 
   @override
@@ -1124,9 +1142,7 @@ class FrbEngineBinding implements EngineBinding {
       engineResize(engine: _engine, columns: columns, rows: rows);
 
   @override
-  void dispose() {
-    _eventSub?.cancel();
-  }
+  void dispose() {}
 
   GridUpdate _toGridUpdate(RenderUpdate u) => GridUpdate(
         full: u.full,
@@ -1148,7 +1164,7 @@ class FrbEngineBinding implements EngineBinding {
   int _maxLine(RenderUpdate u) => u.lines.map((l) => l.line).reduce((a, b) => a > b ? a : b);
 }
 ```
-> Add `import 'dart:typed_data';` at the top of the file. The `rows`/`columns` derivation for the `full` path uses the engine's reported lines; for incremental updates the `MirrorGrid` keeps its existing size (the `apply` only resizes on `full`). Finalize the `engineNew` sink wiring and `listenEvents` stream per the actual generated signature from Task 4 Step 4.
+> The `rows`/`columns` derivation for the `full` path uses the engine's reported lines; for incremental updates the `MirrorGrid` keeps its existing size (`apply` only resizes on `full`). Confirm the generated `EngineEvent_*` variant class names and the `field0` accessor in `lib/src/rust/event_proxy.dart` (Task 4 Step 2) and adjust the `is`-checks if FRB names them differently.
 
 - [ ] **Step 2: Rewrite TerminalScreen to host the client**
 
@@ -1209,9 +1225,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _rows = rows;
 
     final pty = FlutterPtyBackend(rows: rows, columns: cols);
-    final binding = FrbEngineBinding(columns: cols, rows: rows);
-    binding.listenEvents(
-      onPtyWrite: (bytes) => pty.write(bytes),
+    final binding = FrbEngineBinding(
+      columns: cols,
+      rows: rows,
+      onPtyWrite: pty.write,
       onTitle: (t) => _title.value = t,
       onBell: _flashBell,
       onClipboard: (t) => Clipboard.setData(ClipboardData(text: t)),
@@ -1335,8 +1352,8 @@ git commit -m "docs: Plan 2A acceptance findings + carry-over notes"
 
 ## Self-Review (completed by author)
 
-- **Spec coverage:** async advance off UI thread + coalescing/backpressure (Task 8); damage incremental via `term.damage()`/`reset_damage()` (Task 3); event back-channel `PtyWrite`/`Title`/`ResetTitle`/`Bell`/`ClipboardStore` (Tasks 2, 4, 9); glyph cache (Task 6) + mutable MirrorGrid (Task 5) + painter (Task 7); cols sub-pixel fix (Task 7) + ruler verification (Task 10); error-handling `catch_unwind` — **gap noted**: not yet a dedicated task → see "Added" below; acceptance (Task 10). Deliberate deferrals (ColorRequest/TextAreaSizeRequest no-op; ClipboardLoad empty) are documented in the header.
-- **Added for coverage:** the spec's FFI-panic `catch_unwind` (§6) is folded into Task 4 — wrap the bodies of `engine_advance`/`engine_take_damage` in `std::panic::catch_unwind` (the engine is `RefUnwindSafe` via `AssertUnwindSafe`) returning normally on panic; add a Rust unit test feeding a deliberately malformed long sequence and asserting no panic escapes. Implementer: add this as Task 4 Step 0 (before the API rewrite) or a follow-up commit.
-- **Placeholder scan:** the only deferred-to-runtime detail is the FRB-generated sink/stream signature (Task 4 Step 4 / Task 9 Step 1), which genuinely must be read from codegen output; every other step has complete code.
-- **Type consistency:** `RenderUpdate{lines,full,cursor_line,cursor_col,cursor_visible}`, `LineUpdate{line,cells}`, `CellData{codepoint,fg,bg,flags}` consistent Rust↔FRB↔Dart. Dart `GridUpdate`/`LineCells` fields match between MirrorGrid (Task 5), client/test (Task 8), and `_toGridUpdate` (Task 9). `engineNew/engineAdvance/engineTakeDamage/engineFullSnapshot/engineResize` names consistent (Tasks 4, 9). `GlyphCache.get(codepoint, fg)` matches between Task 6 and Task 7.
+- **Validation (post-write, before execution):** (1) confirmed against alacritty source — `Grid: Index<Line> → Row<T>` and `Row<T>: Index<Column>`, so `grid[Line(r)][Column(c)]` is valid; no `T: Clone` bound on the listener, so `Term<EventProxy>` constructs fine; `grid.cursor` is `pub`. (2) FRB `StreamSink`-as-constructor-param was the only weak assumption → **redesigned to per-frame event polling** (`engine_take_events`), removing the unknown and fitting the existing drain loop. The plan above reflects polling throughout.
+- **Spec coverage:** async advance off UI thread + coalescing/backpressure (Task 8); damage incremental via `term.damage()`/`reset_damage()` (Task 3); event back-channel `PtyWrite`/`Title`/`ResetTitle`/`Bell`/`ClipboardStore`, **polled** (Tasks 2, 3, 4, 8, 9); glyph cache (Task 6) + mutable MirrorGrid (Task 5) + painter (Task 7); cols sub-pixel fix (Task 7) + ruler verification (Task 10); FFI-panic `catch_unwind` folded into Task 4 Step 1 (`engine_advance`/`engine_take_damage` wrapped in `catch_unwind(AssertUnwindSafe(...))`); acceptance (Task 10). Deliberate deferrals (ColorRequest/TextAreaSizeRequest no-op; ClipboardLoad empty) documented in the header.
+- **Placeholder scan:** the only deferred-to-codegen detail is the FRB-generated `EngineEvent_*` variant names + `field0` accessor (Task 4 Step 3 / Task 9 Step 1), which must be read from `lib/src/rust/event_proxy.dart`; every other step has complete code.
+- **Type consistency:** `RenderUpdate{lines,full,cursor_line,cursor_col,cursor_visible}`, `LineUpdate{line,cells}`, `CellData{codepoint,fg,bg,flags}` consistent Rust↔FRB↔Dart. `EventQueue`/`take_events` consistent (Tasks 2, 3, 4). Dart `GridUpdate`/`LineCells` fields match between MirrorGrid (Task 5), client/test (Task 8), and `_toGridUpdate` (Task 9). `engineNew/engineAdvance/engineTakeDamage/engineTakeEvents/engineFullSnapshot/engineResize` names consistent (Tasks 4, 9). `EngineBinding` (advance/takeDamage/pumpEvents/resize/dispose) consistent between interface (Task 8), `_FakeBinding` (Task 8), and `FrbEngineBinding` (Task 9). `GlyphCache.get(codepoint, fg)` matches between Task 6 and Task 7.
 ```

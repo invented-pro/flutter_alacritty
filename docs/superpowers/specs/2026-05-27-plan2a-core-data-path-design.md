@@ -89,6 +89,8 @@ This guarantees: at most one advance in flight, one batch per frame, leftover re
 
 ## 4. FRB API & types
 
+> **Superseded during plan validation:** the `StreamSink` event delivery shown below was replaced with **per-frame polling** (`engine_take_events() -> Vec<EngineEvent>`, drained alongside `engine_take_damage` each frame). `engine_new` therefore keeps its simple `(columns, rows)` signature and the engine owns an `Arc<Mutex<Vec<EngineEvent>>>` queue. Rationale: FRB `StreamSink`-as-constructor-param is awkward and the client already drains per frame. See the implementation plan for the authoritative API.
+
 ```rust
 // engine_new now takes the event sink so the EventProxy is wired at construction.
 #[frb(sync)]
