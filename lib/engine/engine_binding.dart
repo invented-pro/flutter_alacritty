@@ -80,8 +80,10 @@ class FrbEngineBinding implements EngineBinding {
 
   GridUpdate _toGridUpdate(RenderUpdate u) => GridUpdate(
         full: u.full,
-        rows: u.lines.isNotEmpty ? _maxLine(u) + 1 : 0,
-        columns: u.lines.isNotEmpty ? u.lines.first.cells.length : 0,
+        // rows/columns only matter on a full update (MirrorGrid.apply resizes
+        // only then); a full snapshot has contiguous lines 0..rows-1.
+        rows: u.full ? u.lines.length : 0,
+        columns: (u.full && u.lines.isNotEmpty) ? u.lines.first.cells.length : 0,
         cursorRow: u.cursorLine,
         cursorCol: u.cursorCol,
         cursorVisible: u.cursorVisible,
@@ -101,6 +103,4 @@ class FrbEngineBinding implements EngineBinding {
     }
     return LineCells(line: l.line, codepoints: codepoints, fg: fg, bg: bg);
   }
-
-  int _maxLine(RenderUpdate u) => u.lines.map((l) => l.line).reduce((a, b) => a > b ? a : b);
 }

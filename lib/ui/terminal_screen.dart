@@ -27,6 +27,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   late final CellMetrics _metrics = CellMetrics.measure(_style);
   late final GlyphCache _glyphs = GlyphCache(
     fontFamily: _style.fontFamily!,
+    fontFamilyFallback: _style.fontFamilyFallback ?? const [],
     fontSize: _style.fontSize!,
     cellWidth: _metrics.width,
   );
@@ -39,17 +40,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
   StreamSubscription<Uint8List>? _outputSub;
   int _cols = 0, _rows = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    // Async FRB drain updates the grid off the build phase; repaint: grid alone is
-    // not reliable here (unlike sync main). setState matches a proven rebuild path.
-    _grid.addListener(_onGridChanged);
-  }
-
-  void _onGridChanged() {
-    if (mounted) setState(() {});
-  }
+  // Repaint is driven by CustomPaint(repaint: _grid): MirrorGrid.apply() notifies,
+  // RenderCustomPaint marks needs-paint, and the client requests a frame when it
+  // schedules a drain — so no per-frame setState rebuild is needed.
 
   void _ensureStarted(int cols, int rows) {
     if (_client != null) {
@@ -80,7 +73,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _outputSub = pty.output.listen(_client!.feed);
   }
 
-  void _flashBell() {/* sub-project C may add a real flash; A: hook present */}
+  void _flashBell() {
+    // Audible bell; a visual flash is sub-project C.
+    SystemSound.play(SystemSoundType.alert);
+  }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
@@ -95,7 +91,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   void dispose() {
-    _grid.removeListener(_onGridChanged);
     _outputSub?.cancel();
     _pty?.kill();
     _client?.dispose();

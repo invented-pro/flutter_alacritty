@@ -4,8 +4,12 @@ import 'package:flutter/scheduler.dart';
 import 'glyph_cache.dart';
 import 'mirror_grid.dart';
 
+/// System monospace from `fc-match monospace`; falls back to generic monospace.
+const kTerminalFontFamily = 'DejaVu Sans Mono';
+
 const kTerminalTextStyle = TextStyle(
-  fontFamily: 'monospace',
+  fontFamily: kTerminalFontFamily,
+  fontFamilyFallback: ['monospace'],
   fontSize: 14,
   height: 1.2,
 );

@@ -6,54 +6,7 @@ import 'package:flutter_alacritty/render/glyph_cache.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/render/terminal_painter.dart';
 
-/// Mirrors [TerminalScreen]'s grid → setState → CustomPaint repaint path.
-class _GridRepaintHarness extends StatefulWidget {
-  const _GridRepaintHarness({required this.grid});
-
-  final MirrorGrid grid;
-
-  @override
-  State<_GridRepaintHarness> createState() => _GridRepaintHarnessState();
-}
-
-class _GridRepaintHarnessState extends State<_GridRepaintHarness> {
-  static int paintCount = 0;
-
-  late final GlyphCache _glyphs = GlyphCache(
-    fontFamily: 'monospace',
-    fontSize: 14,
-    cellWidth: 8,
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    widget.grid.addListener(_onGridChanged);
-  }
-
-  void _onGridChanged() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    widget.grid.removeListener(_onGridChanged);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: const Size(32, 16),
-      painter: _CountingTerminalPainter(
-        grid: widget.grid,
-        glyphs: _glyphs,
-        cellWidth: 8,
-        cellHeight: 16,
-      ),
-    );
-  }
-}
+int _paintCount = 0;
 
 class _CountingTerminalPainter extends TerminalPainter {
   _CountingTerminalPainter({
@@ -65,7 +18,7 @@ class _CountingTerminalPainter extends TerminalPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    _GridRepaintHarnessState.paintCount++;
+    _paintCount++;
     super.paint(canvas, size);
   }
 }
@@ -73,21 +26,36 @@ class _CountingTerminalPainter extends TerminalPainter {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('setState on grid notify repaints CustomPaint', (tester) async {
+  // Regression guard for the idle-refresh bug: a plain CustomPaint(repaint: grid)
+  // — with NO setState wrapper — must repaint when the grid notifies. This is why
+  // TerminalScreen can rely on `repaint: grid` alone (the client requests the frame).
+  testWidgets('repaint: grid repaints CustomPaint on grid notify (no setState)',
+      (tester) async {
     final grid = MirrorGrid();
     grid.initializeEmpty(1, 2);
-    _GridRepaintHarnessState.paintCount = 0;
+    final glyphs = GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
+    _paintCount = 0;
 
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
-        child: _GridRepaintHarness(grid: grid),
+        child: CustomPaint(
+          size: const Size(32, 16),
+          painter: _CountingTerminalPainter(
+            grid: grid,
+            glyphs: glyphs,
+            cellWidth: 8,
+            cellHeight: 16,
+          ),
+        ),
       ),
     );
     await tester.pump();
-    final afterFirstFrame = _GridRepaintHarnessState.paintCount;
+    final afterFirstFrame = _paintCount;
     expect(afterFirstFrame, greaterThan(0));
 
+    // Mutate the grid with no setState anywhere — repaint must come from the
+    // repaint: grid Listenable marking the render object needs-paint.
     grid.apply(GridUpdate(
       full: false,
       rows: 1,
@@ -106,6 +74,11 @@ void main() {
     ));
     await tester.pump();
 
-    expect(_GridRepaintHarnessState.paintCount, greaterThan(afterFirstFrame));
+    expect(
+      _paintCount,
+      greaterThan(afterFirstFrame),
+      reason: 'CustomPaint(repaint: grid) must repaint on notifyListeners '
+          'without any setState',
+    );
   });
 }

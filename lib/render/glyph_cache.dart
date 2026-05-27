@@ -8,14 +8,17 @@ class GlyphCache {
     required this.fontFamily,
     required this.fontSize,
     required this.cellWidth,
+    this.fontFamilyFallback = const [],
     this.maxEntries = 4096,
     this.maxBuildsPerFrame = 128,
   });
 
   final String fontFamily;
+  final List<String> fontFamilyFallback;
   final double fontSize;
   final double cellWidth;
   final int maxEntries;
+
   /// Caps synchronous paragraph layout per frame so first paint cannot freeze the UI.
   final int maxBuildsPerFrame;
 
@@ -27,30 +30,17 @@ class GlyphCache {
   void beginFrame() => _buildsThisFrame = 0;
 
   /// Returns a cached paragraph, or builds one if under the per-frame budget.
+  /// Returns null when the budget is exhausted (the painter schedules a warmup
+  /// frame and the glyph fills in next frame).
   ui.Paragraph? tryGet(int codepoint, int fg) {
-    final key = (codepoint << 24) ^ (fg & 0xFFFFFF);
-    final existing = _cache.remove(key);
-    if (existing != null) {
-      _cache[key] = existing;
-      return existing;
-    }
-    if (_buildsThisFrame >= maxBuildsPerFrame) return null;
-    _buildsThisFrame++;
-    final p = _build(codepoint, fg);
-    _cache[key] = p;
-    if (_cache.length > maxEntries) {
-      _cache.remove(_cache.keys.first);
-    }
-    return p;
-  }
-
-  ui.Paragraph get(int codepoint, int fg) {
     final key = (codepoint << 24) ^ (fg & 0xFFFFFF);
     final existing = _cache.remove(key); // remove+reinsert = LRU touch
     if (existing != null) {
       _cache[key] = existing;
       return existing;
     }
+    if (_buildsThisFrame >= maxBuildsPerFrame) return null;
+    _buildsThisFrame++;
     final p = _build(codepoint, fg);
     _cache[key] = p;
     if (_cache.length > maxEntries) {
@@ -67,6 +57,7 @@ class GlyphCache {
       ..pushStyle(ui.TextStyle(
         color: ui.Color(0xFF000000 | (fg & 0xFFFFFF)),
         fontFamily: fontFamily,
+        fontFamilyFallback: fontFamilyFallback,
         fontSize: fontSize,
       ))
       ..addText(String.fromCharCode(codepoint));
