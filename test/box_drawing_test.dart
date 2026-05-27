@@ -50,6 +50,21 @@ void main() {
     expect(boxOps(0x256D, cell, lw).whereType<ArcOp>().length, 1); // ╭
   });
 
+  test('rounded corner arms reach the cell edges (no gap to adjacent lines)', () {
+    bool touchesY(List<LineOp> ls, double y) =>
+        ls.any((l) => l.a.dy == y || l.b.dy == y);
+    bool touchesX(List<LineOp> ls, double x) =>
+        ls.any((l) => l.a.dx == x || l.b.dx == x);
+
+    final dr = boxOps(0x256D, cell, lw).whereType<LineOp>().toList(); // ╭ down+right
+    expect(touchesY(dr, cell.bottom), isTrue, reason: '╭ must reach the bottom edge');
+    expect(touchesX(dr, cell.right), isTrue, reason: '╭ must reach the right edge');
+
+    final ul = boxOps(0x256F, cell, lw).whereType<LineOp>().toList(); // ╯ up+left
+    expect(touchesY(ul, cell.top), isTrue, reason: '╯ must reach the top edge');
+    expect(touchesX(ul, cell.left), isTrue, reason: '╯ must reach the left edge');
+  });
+
   test('diagonal cross emits two lines', () {
     expect(boxOps(0x2573, cell, lw).whereType<LineOp>().length, 2); // ╳
   });

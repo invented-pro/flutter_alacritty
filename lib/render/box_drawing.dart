@@ -58,45 +58,42 @@ List<BoxOp> boxOps(int cp, Rect cell, double lineWidth) {
   return const [];
 }
 
+// Rounded corner = two straight arms reaching the cell edges + a quarter-arc
+// rounding the join at the center. A single circular arc cannot reach both edge
+// midpoints of a non-square (tall) terminal cell, so the arms close the gap and
+// the arc only rounds the corner. `rr` is the rounding radius (<= half the
+// smaller side); for tall cells the side-edge arm is zero-length (the arc
+// reaches that edge directly) while the top/bottom arm fills the rest.
 List<BoxOp> _roundedOps(int cp, Rect cell, double lineWidth) {
   final cx = cell.center.dx, cy = cell.center.dy;
-  final r = (cell.width < cell.height ? cell.width : cell.height) / 2;
+  final rr = (cell.width < cell.height ? cell.width : cell.height) / 2;
+  const halfPi = 1.5707963267948966;
+  const pi = 3.141592653589793;
+  Rect arc(Offset center) => Rect.fromCircle(center: center, radius: rr);
   switch (cp) {
-    case 0x256D: // ╭
+    case 0x256D: // ╭ down + right
       return [
-        ArcOp(
-          Rect.fromCircle(center: Offset(cx + r, cy + r), radius: r),
-          3.1415926,
-          1.5707963,
-          lineWidth,
-        ),
+        LineOp(Offset(cx, cy + rr), Offset(cx, cell.bottom), lineWidth),
+        LineOp(Offset(cx + rr, cy), Offset(cell.right, cy), lineWidth),
+        ArcOp(arc(Offset(cx + rr, cy + rr)), pi, halfPi, lineWidth),
       ];
-    case 0x256E: // ╮
+    case 0x256E: // ╮ down + left
       return [
-        ArcOp(
-          Rect.fromCircle(center: Offset(cx - r, cy + r), radius: r),
-          4.7123889,
-          1.5707963,
-          lineWidth,
-        ),
+        LineOp(Offset(cx, cy + rr), Offset(cx, cell.bottom), lineWidth),
+        LineOp(Offset(cell.left, cy), Offset(cx - rr, cy), lineWidth),
+        ArcOp(arc(Offset(cx - rr, cy + rr)), 3 * halfPi, halfPi, lineWidth),
       ];
-    case 0x256F: // ╯
+    case 0x256F: // ╯ up + left
       return [
-        ArcOp(
-          Rect.fromCircle(center: Offset(cx - r, cy - r), radius: r),
-          0,
-          1.5707963,
-          lineWidth,
-        ),
+        LineOp(Offset(cx, cell.top), Offset(cx, cy - rr), lineWidth),
+        LineOp(Offset(cell.left, cy), Offset(cx - rr, cy), lineWidth),
+        ArcOp(arc(Offset(cx - rr, cy - rr)), 0, halfPi, lineWidth),
       ];
-    case 0x2570: // ╰
+    case 0x2570: // ╰ up + right
       return [
-        ArcOp(
-          Rect.fromCircle(center: Offset(cx + r, cy - r), radius: r),
-          1.5707963,
-          1.5707963,
-          lineWidth,
-        ),
+        LineOp(Offset(cx, cell.top), Offset(cx, cy - rr), lineWidth),
+        LineOp(Offset(cx + rr, cy), Offset(cell.right, cy), lineWidth),
+        ArcOp(arc(Offset(cx + rr, cy - rr)), halfPi, halfPi, lineWidth),
       ];
   }
   return const [];
