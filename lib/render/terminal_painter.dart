@@ -1,87 +1,56 @@
 import 'package:flutter/material.dart';
 
+import 'glyph_cache.dart';
 import 'mirror_grid.dart';
 
-/// System monospace from `fc-match monospace` on this Linux desktop.
-const kTerminalFontFamily = 'DejaVu Sans Mono';
-
-/// Default terminal [TextStyle]; measure with [CellMetrics.measure].
 const kTerminalTextStyle = TextStyle(
-  fontFamily: kTerminalFontFamily,
-  fontFamilyFallback: ['monospace'],
+  fontFamily: 'monospace',
   fontSize: 14,
   height: 1.2,
 );
 
-/// Monospace cell metrics measured once from the text style.
-class CellMetrics {
-  CellMetrics(this.width, this.height);
-  final double width;
-  final double height;
-
-  static CellMetrics measure(TextStyle style) {
-    final tp = TextPainter(
-      text: TextSpan(text: 'W', style: style),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    return CellMetrics(tp.width, tp.height);
-  }
-}
-
 class TerminalPainter extends CustomPainter {
   TerminalPainter({
     required this.grid,
-    required this.style,
-    required this.metrics,
+    required this.glyphs,
+    required this.cellWidth,
+    required this.cellHeight,
   }) : super(repaint: grid);
 
   final MirrorGrid grid;
-  final TextStyle style;
-  final CellMetrics metrics;
+  final GlyphCache glyphs;
+  final double cellWidth;
+  final double cellHeight;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final snap = grid.snapshot;
-    if (snap == null) return;
-    final cw = metrics.width, ch = metrics.height;
+    final rows = grid.rows, cols = grid.columns;
+    if (rows == 0 || cols == 0) return;
+    final bgPaint = Paint();
 
-    for (var row = 0; row < snap.rows; row++) {
-      for (var col = 0; col < snap.columns; col++) {
-        final i = row * snap.columns + col;
-        final x = col * cw, y = row * ch;
+    for (var row = 0; row < rows; row++) {
+      final y = row * cellHeight;
+      for (var col = 0; col < cols; col++) {
+        final x = col * cellWidth;
+        bgPaint.color = Color(0xFF000000 | grid.bgAt(row, col));
+        canvas.drawRect(Rect.fromLTWH(x, y, cellWidth, cellHeight), bgPaint);
 
-        // Background.
-        final bg = Color(0xFF000000 | snap.bg[i]);
-        canvas.drawRect(Rect.fromLTWH(x, y, cw, ch), Paint()..color = bg);
-
-        // Glyph (skip blanks).
-        final cp = snap.codepoints[i];
+        final cp = grid.codepointAt(row, col);
         if (cp != 32 && cp != 0) {
-          final tp = TextPainter(
-            text: TextSpan(
-              text: String.fromCharCode(cp),
-              style: style.copyWith(color: Color(0xFF000000 | snap.fg[i])),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout();
-          tp.paint(canvas, Offset(x, y));
+          canvas.drawParagraph(glyphs.get(cp, grid.fgAt(row, col)), Offset(x, y));
         }
       }
     }
 
-    // Block cursor.
-    if (snap.cursorVisible) {
-      final cx = snap.cursorCol * cw, cy = snap.cursorRow * ch;
+    if (grid.cursorVisible) {
       canvas.drawRect(
-        Rect.fromLTWH(cx, cy, cw, ch),
-        Paint()
-          ..color = const Color(0x88FFFFFF)
-          ..style = PaintingStyle.fill,
+        Rect.fromLTWH(grid.cursorCol * cellWidth, grid.cursorRow * cellHeight, cellWidth, cellHeight),
+        Paint()..color = const Color(0x88FFFFFF),
       );
     }
   }
 
   @override
   bool shouldRepaint(covariant TerminalPainter old) =>
-      old.grid != grid || old.metrics != metrics;
+      old.grid != grid || old.cellWidth != cellWidth || old.cellHeight != cellHeight;
 }
