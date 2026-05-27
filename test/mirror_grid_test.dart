@@ -52,6 +52,31 @@ void main() {
     expect(g.generation, before + 1);
   });
 
+  test('partial line wider than viewport clamps without throwing', () {
+    final g = MirrorGrid();
+    g.initializeEmpty(2, 10);
+    final wide = Int32List(15)..fillRange(0, 15, 65); // 'A' × 15
+    g.apply(GridUpdate(
+      full: false,
+      rows: 1,
+      columns: 15,
+      lines: [
+        LineCells(
+          line: 0,
+          codepoints: wide,
+          fg: Int32List(15),
+          bg: Int32List(15),
+        ),
+      ],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    expect(g.columns, 10);
+    expect(g.codepointAt(0, 0), 65);
+    expect(g.codepointAt(0, 9), 65);
+  });
+
   test('partial update does not shrink viewport from inferred rows', () {
     final g = MirrorGrid();
     g.initializeEmpty(24, 80);

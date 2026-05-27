@@ -88,9 +88,13 @@ class MirrorGrid extends ChangeNotifier {
     }
     for (final l in u.lines) {
       if (l.line < 0 || l.line >= _rows) continue;
-      _codepoints[l.line].setAll(0, l.codepoints);
-      _fg[l.line].setAll(0, l.fg);
-      _bg[l.line].setAll(0, l.bg);
+      // Partial damage can arrive with engine cols > mirror cols when resize races
+      // the async drain (LayoutBuilder grew before post-frame resize ran).
+      final copy = l.codepoints.length < _columns ? l.codepoints.length : _columns;
+      if (copy == 0) continue;
+      _codepoints[l.line].setRange(0, copy, l.codepoints);
+      _fg[l.line].setRange(0, copy, l.fg);
+      _bg[l.line].setRange(0, copy, l.bg);
     }
     _cursorRow = u.cursorRow;
     _cursorCol = u.cursorCol;

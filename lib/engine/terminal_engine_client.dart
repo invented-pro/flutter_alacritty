@@ -32,6 +32,8 @@ class TerminalEngineClient {
   final BytesBuilder _buf = BytesBuilder(copy: false);
   bool _drainScheduled = false;
   bool _advancing = false;
+  int? _pendingColumns;
+  int? _pendingRows;
 
   void feed(Uint8List bytes) {
     _buf.add(bytes);
@@ -51,19 +53,44 @@ class TerminalEngineClient {
     final batch = _buf.takeBytes();
     try {
       final update = await _binding.advanceAndTakeDamage(batch);
-      _grid.apply(update); // notifies repaint: grid → schedules the paint frame
+      _applyUpdate(update);
       _binding.pumpEvents(); // route PtyWrite/Title/Bell/Clipboard for this batch
     } finally {
       _advancing = false;
+      _flushPendingResize();
     }
     if (_buf.isNotEmpty) _scheduleDrain();
   }
 
+  void _applyUpdate(GridUpdate update) {
+    if (!update.full &&
+        _grid.columns > 0 &&
+        update.lines.any((l) => l.codepoints.length != _grid.columns)) {
+      // Engine resized before the mirror caught up — partial line width won't fit.
+      _grid.apply(_binding.fullSnapshot());
+      return;
+    }
+    _grid.apply(update);
+  }
+
   void resize(int columns, int rows) {
+    _pendingColumns = columns;
+    _pendingRows = rows;
+    if (!_advancing) {
+      _flushPendingResize();
+    }
+    SchedulerBinding.instance.scheduleFrame();
+  }
+
+  void _flushPendingResize() {
+    final columns = _pendingColumns;
+    final rows = _pendingRows;
+    if (columns == null || rows == null) return;
+    _pendingColumns = null;
+    _pendingRows = null;
     _binding.resize(columns, rows);
     // Engine resize sets TermDamage::Full; sync snapshot keeps MirrorGrid in sync.
     _grid.apply(_binding.fullSnapshot());
-    SchedulerBinding.instance.scheduleFrame();
   }
 
   void dispose() => _binding.dispose();
