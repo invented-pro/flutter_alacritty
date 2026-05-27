@@ -378,20 +378,21 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     ),
                   ),
                   if (_status != TermStatus.running)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              _status == TermStatus.error
-                                  ? 'failed to start: ${_errorMessage ?? ''} — press any key to retry'
-                                  : 'process exited${_exitCode != null ? ' ($_exitCode)' : ''} — press any key to restart',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Color(0xFFCCCCCC),
-                                fontSize: 14,
-                              ),
+                    IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          color: const Color(0xCC1A1A1A),
+                          child: Text(
+                            _status == TermStatus.error
+                                ? 'failed to start: ${_errorMessage ?? ''} — press any key to retry'
+                                : 'process exited${_exitCode != null ? ' ($_exitCode)' : ''} — press any key to restart',
+                            style: const TextStyle(
+                              color: Color(0xFFEDEDED),
+                              fontSize: 14,
                             ),
                           ),
                         ),
