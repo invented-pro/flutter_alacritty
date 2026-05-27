@@ -11,19 +11,22 @@ pub fn engine_new(columns: u16, rows: u16) -> TerminalEngine {
 
 pub async fn engine_advance(engine: &mut TerminalEngine, bytes: Vec<u8>) {
     // §6 panic isolation: a malformed sequence must never abort the app.
-    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| engine.advance(bytes)));
+    if std::panic::catch_unwind(AssertUnwindSafe(|| engine.advance(bytes))).is_err() {
+        eprintln!("flutter_alacritty: engine_advance panicked (input discarded)");
+    }
 }
 
 pub async fn engine_take_damage(engine: &mut TerminalEngine) -> RenderUpdate {
-    std::panic::catch_unwind(AssertUnwindSafe(|| engine.take_damage())).unwrap_or(
+    std::panic::catch_unwind(AssertUnwindSafe(|| engine.take_damage())).unwrap_or_else(|_| {
+        eprintln!("flutter_alacritty: engine_take_damage panicked (empty update returned)");
         RenderUpdate {
             lines: Vec::new(),
             full: false,
             cursor_line: 0,
             cursor_col: 0,
             cursor_visible: false,
-        },
-    )
+        }
+    })
 }
 
 /// Single FFI round-trip: parse PTY bytes then return damage (hot path).
@@ -31,7 +34,11 @@ pub async fn engine_advance_and_take_damage(
     engine: &mut TerminalEngine,
     bytes: Vec<u8>,
 ) -> RenderUpdate {
-    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| engine.advance(bytes)));
+    if std::panic::catch_unwind(AssertUnwindSafe(|| engine.advance(bytes))).is_err() {
+        eprintln!(
+            "flutter_alacritty: engine_advance_and_take_damage advance panicked (input discarded)"
+        );
+    }
     engine_take_damage(engine).await
 }
 

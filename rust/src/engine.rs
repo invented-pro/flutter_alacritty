@@ -371,14 +371,15 @@ mod tests {
     fn dsr_emits_pty_write() {
         use crate::event_proxy::EngineEvent;
         let mut e = engine(20, 5);
-        e.advance(b"\x1b[6n".to_vec()); // DSR: report cursor position
+        e.advance(b"\x1b[6n".to_vec()); // DSR: report cursor position (1-based row;col R)
         let events = e.take_events();
-        assert!(
-            events
-                .iter()
-                .any(|ev| matches!(ev, EngineEvent::PtyWrite(b) if b.starts_with(b"\x1b["))),
-            "expected a PtyWrite cursor report, got {:?}",
-            events
-        );
+        let report = events
+            .iter()
+            .find_map(|ev| match ev {
+                EngineEvent::PtyWrite(b) => Some(b.as_slice()),
+                _ => None,
+            })
+            .expect("expected a PtyWrite cursor report");
+        assert_eq!(report, b"\x1b[1;1R");
     }
 }

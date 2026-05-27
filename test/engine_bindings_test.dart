@@ -45,17 +45,16 @@ void main() {
     );
   });
 
-  test('advance + take_damage round-trips and DSR emits a PtyWrite event', () async {
+  test('advanceAndTakeDamage round-trips and DSR emits a PtyWrite event', () async {
     final engine = engineNew(columns: 20, rows: 5);
 
-    await engineAdvance(engine: engine, bytes: 'hi'.codeUnits);
-    final u = await engineTakeDamage(engine: engine);
+    final u = await engineAdvanceAndTakeDamage(engine: engine, bytes: 'hi'.codeUnits);
     final line0 = u.lines.firstWhere((l) => l.line == 0);
     expect(String.fromCharCode(line0.cells[0].codepoint), 'h');
     expect(String.fromCharCode(line0.cells[1].codepoint), 'i');
 
     // DSR cursor-position query → a PtyWrite event, drained by polling.
-    await engineAdvance(engine: engine, bytes: '\x1b[6n'.codeUnits);
+    await engineAdvanceAndTakeDamage(engine: engine, bytes: '\x1b[6n'.codeUnits);
     final events = engineTakeEvents(engine: engine);
     expect(events.whereType<EngineEvent_PtyWrite>(), isNotEmpty);
   });
