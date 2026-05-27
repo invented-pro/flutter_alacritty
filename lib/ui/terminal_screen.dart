@@ -8,6 +8,8 @@ import '../engine/engine_binding.dart';
 import '../engine/terminal_engine_client.dart';
 import '../input/key_input.dart';
 import '../input/mouse_input.dart';
+import '../input/paste.dart';
+import '../input/term_mode.dart';
 import '../pty/flutter_pty_backend.dart';
 import '../pty/pty_backend.dart';
 import '../render/cell_metrics.dart';
@@ -51,6 +53,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   PtyBackend? _pty;
   StreamSubscription<Uint8List>? _outputSub;
   int _cols = 0, _rows = 0;
+  bool _lastFocused = false;
 
   // Repaint is driven by CustomPaint(repaint: _grid): MirrorGrid.apply() notifies,
   // RenderCustomPaint marks needs-paint, and the client requests a frame when it
@@ -83,6 +86,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _client = TerminalEngineClient(binding: binding, grid: _grid);
     _grid.initializeEmpty(rows, cols);
     _outputSub = pty.output.listen(_client!.feed);
+    _focus.addListener(_reportFocus);
   }
 
   void _flashBell() {
@@ -95,6 +99,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
       return KeyEventResult.ignored;
     }
     final hw = HardwareKeyboard.instance;
+    if (hw.isControlPressed &&
+        hw.isShiftPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyV) {
+      _paste();
+      return KeyEventResult.handled;
+    }
     final bytes = encodeKey(
       event.logicalKey,
       event.character,
@@ -107,6 +117,24 @@ class _TerminalScreenState extends State<TerminalScreen> {
     if (bytes == null) return KeyEventResult.ignored;
     _pty?.write(bytes);
     return KeyEventResult.handled;
+  }
+
+  Future<void> _paste() async {
+    final data = await Clipboard.getData('text/plain');
+    final text = data?.text;
+    if (text == null || text.isEmpty || _pty == null) return;
+    _pty!.write(pasteBytes(text, modeFlags: _grid.modeFlags));
+  }
+
+  void _reportFocus() {
+    if (_pty == null || !focusReport(_grid.modeFlags)) {
+      _lastFocused = _focus.hasFocus;
+      return;
+    }
+    if (_focus.hasFocus == _lastFocused) return;
+    _lastFocused = _focus.hasFocus;
+    _pty!.write(Uint8List.fromList(
+        _focus.hasFocus ? [0x1b, 0x5b, 0x49] : [0x1b, 0x5b, 0x4f])); // ESC[I / ESC[O
   }
 
   void _reportMouse(Offset local, int button, MouseAction action) {
@@ -136,6 +164,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _pty?.kill();
     _client?.dispose();
     _grid.dispose();
+    _focus.removeListener(_reportFocus);
     _focus.dispose();
     super.dispose();
   }
