@@ -38,6 +38,7 @@ into this plan** as the `[font] line_height` field.
 | Color resolution | Stays **in Rust**. Cells already arrive packed to `0x00RRGGBB`, so keeping resolution in Rust means **zero render-protocol change**. The hardcoded `ansi16` table + `DEFAULT_FG`/`DEFAULT_BG` consts become a per-`TerminalEngine` palette injected at `engine_new`. This mirrors alacritty's own core (it owns the palette). |
 | Config split | The 18-color palette + scrollback are the only fields that cross into Rust (via `EngineConfig`). Everything else (font, blink, scroll multiplier, selection color, window bg, double-click) is consumed Dart-side. |
 | Loading | Read once in `main()` before `runApp`. `TerminalConfig` flows down as a constructor arg to `TerminalScreen` (default `TerminalConfig.defaults()` so existing widget tests need no change). |
+| Library boundary | `TerminalConfig` is the **public, programmatic value object** — a host app can construct it in code or `copyWith` the defaults with **no file at all**. TOML *parsing* (`TerminalConfig.fromTomlString`) is a pure factory, separate from TOML *file resolution* (`ConfigLoader`, the only place that knows the XDG path — app-level glue a library consumer skips). Each config section is its own immutable type with `copyWith`, so adding fields later (2G search-highlight, 2H touch) is additive and non-breaking. |
 | Error policy | File absent → silent defaults (normal first run). Parse error / wrong-typed field → whole-config fallback to defaults + `debugPrint`. A single bad color string → that one field defaults, the rest load. Never crash, never block, never modal. |
 | TOML library | `toml: ^0.16` (pub.dev, the standard Dart TOML parser). |
 | Color format | `"#rrggbb"`, `"#aarrggbb"`, or `"0xrrggbb"`. Parsed to a packed int; alpha (if present) is preserved only for the selection overlay, stripped to RGB for palette entries. |
@@ -151,9 +152,15 @@ The `catch_unwind` panic isolation in `api/terminal.rs` is unchanged.
 
 ```
 NEW  lib/config/color_parse.dart        parseColor("#rrggbb"/"#aarrggbb"/"0x..") -> int? (null on bad)
-NEW  lib/config/terminal_config.dart    immutable TerminalConfig + nested value types + .defaults()
-                                          + .textStyle getter + .engineConfig getter + selectionOverlay
-NEW  lib/config/config_loader.dart       resolveConfigPath() + load() (read+parse+per-section fallback)
+NEW  lib/config/terminal_config.dart    PUBLIC value object: immutable TerminalConfig + per-section
+                                          immutable types (TerminalColors/FontConfig/CursorConfig/
+                                          ScrollConfig/MouseConfig), each with copyWith; top-level
+                                          copyWith; .defaults(); .textStyle / .engineConfig /
+                                          selectionOverlay getters; static fromTomlString(String) factory
+NEW  lib/config/config_loader.dart       APP-LEVEL glue: resolveConfigPath() (XDG) + load()
+                                          (read file → TerminalConfig.fromTomlString → defaults on failure).
+                                          The ONLY component that knows the on-disk path; library
+                                          consumers skip it and build TerminalConfig directly.
 MOD  pubspec.yaml                        + toml: ^0.16
 MOD  lib/src/rust/api/terminal.dart      (regen) engineNew gains config; EngineConfig type
 MOD  lib/engine/engine_binding.dart      FrbEngineBinding ctor takes EngineConfig, forwards to engineNew
@@ -201,6 +208,9 @@ Loading is **synchronous** (`File.readAsStringSync`) so `main()` has the config 
   one bad color string → that field defaults, siblings load; nonexistent path → defaults.
 - `TerminalConfig.engineConfig`: palette list is length 18 in the documented order;
   `selectionOverlay` carries the `0x55` alpha over the configured selection RGB.
+- **Library boundary:** `TerminalConfig.defaults().copyWith(...)` overrides only the named field
+  (e.g. a host app that sets just `font.size`); `fromTomlString` is exercised directly with a
+  string (no file) — proving parsing is decoupled from file IO. A per-section `copyWith` round-trips.
 
 **Dart widget:**
 - `TerminalScreen(config: <bg #102030>)` with the existing fake binding → the `Scaffold`
@@ -227,3 +237,23 @@ Loading is **synchronous** (`File.readAsStringSync`) so `main()` has the config 
   These two must stay in sync; a Rust test asserts the fallback table equals the documented values.
 - **`kTerminalTextStyle`:** retained only as the literal source for `TerminalConfig.defaults()`
   so the default font definition stays in one obvious place; the painter no longer reads it directly.
+
+## 10. Extensibility & library use
+
+This project may later be embedded as a library by other Flutter apps, so 2F draws the config
+boundary now (cheap to do here, expensive to retrofit):
+
+- **`TerminalConfig` + its section types are the public value-object API.** A consumer builds one
+  in code — `TerminalConfig.defaults().copyWith(font: FontConfig(size: 16))` — or hands `TerminalScreen`
+  a fully custom instance. No file, no XDG path, no TOML required to use the widget.
+- **Three decoupled layers, each usable alone:** (1) the value object (`TerminalConfig`),
+  (2) the pure parser (`fromTomlString`), (3) the app-level file/path resolver (`ConfigLoader`).
+  Our `main.dart` wires all three; a library host uses only layer 1 (or 1+2 with its own file source).
+- **Additive schema:** unknown TOML keys are ignored and missing keys default, so future fields
+  (2G search-highlight color, 2H touch parameters) and host-app extensions never break existing
+  configs in either direction.
+
+**Deferred (YAGNI until a real consumer exists):** a `lib/flutter_alacritty.dart` export barrel,
+pub package metadata, and published doc comments. The widget + config entry points
+(`TerminalScreen(config:)`, `TerminalConfig`) are already the clean seams those would expose, so
+packaging later is mechanical.
