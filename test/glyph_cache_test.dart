@@ -20,6 +20,16 @@ void main() {
     expect(cache.length, 2);
   });
 
+  test('wide and narrow keys are distinct', () {
+    final cache = GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8, maxEntries: 4);
+    const cp = 0x4E2D; // 中
+    final narrow = cache.tryGet(cp, 0xFFFFFF, wide: false);
+    final wide = cache.tryGet(cp, 0xFFFFFF, wide: true);
+    expect(narrow, isNotNull);
+    expect(wide, isNotNull);
+    expect(identical(narrow, wide), isFalse);
+  });
+
   test('returns null past the per-frame build budget', () {
     final cache = GlyphCache(
         fontFamily: 'monospace', fontSize: 14, cellWidth: 8, maxBuildsPerFrame: 1);

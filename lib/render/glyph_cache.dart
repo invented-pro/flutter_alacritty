@@ -32,8 +32,8 @@ class GlyphCache {
   /// Returns a cached paragraph, or builds one if under the per-frame budget.
   /// Returns null when the budget is exhausted (the painter schedules a warmup
   /// frame and the glyph fills in next frame).
-  ui.Paragraph? tryGet(int codepoint, int fg) {
-    final key = (codepoint << 24) ^ (fg & 0xFFFFFF);
+  ui.Paragraph? tryGet(int codepoint, int fg, {bool wide = false}) {
+    final key = (codepoint << 25) ^ ((wide ? 1 : 0) << 24) ^ (fg & 0xFFFFFF);
     final existing = _cache.remove(key); // remove+reinsert = LRU touch
     if (existing != null) {
       _cache[key] = existing;
@@ -41,7 +41,7 @@ class GlyphCache {
     }
     if (_buildsThisFrame >= maxBuildsPerFrame) return null;
     _buildsThisFrame++;
-    final p = _build(codepoint, fg);
+    final p = _build(codepoint, fg, wide: wide);
     _cache[key] = p;
     if (_cache.length > maxEntries) {
       _cache.remove(_cache.keys.first); // evict eldest
@@ -49,7 +49,7 @@ class GlyphCache {
     return p;
   }
 
-  ui.Paragraph _build(int codepoint, int fg) {
+  ui.Paragraph _build(int codepoint, int fg, {bool wide = false}) {
     final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
       fontFamily: fontFamily,
       fontSize: fontSize,
@@ -61,7 +61,8 @@ class GlyphCache {
         fontSize: fontSize,
       ))
       ..addText(String.fromCharCode(codepoint));
-    final p = builder.build()..layout(ui.ParagraphConstraints(width: cellWidth));
+    final width = wide ? cellWidth * 2 : cellWidth;
+    final p = builder.build()..layout(ui.ParagraphConstraints(width: width));
     return p;
   }
 }
