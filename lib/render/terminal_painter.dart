@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'cell_flags.dart';
 import 'glyph_cache.dart';
 import 'mirror_grid.dart';
 
@@ -34,35 +35,45 @@ class TerminalPainter extends CustomPainter {
     final rows = grid.rows, cols = grid.columns;
     if (rows == 0 || cols == 0) return;
     glyphs.beginFrame();
-    final bgPaint = Paint();
-    var needsWarmupFrame = false;
 
+    // Pass 1: backgrounds (so a wide glyph isn't overwritten by the spacer's bg).
+    final bgPaint = Paint();
     for (var row = 0; row < rows; row++) {
       final y = row * cellHeight;
       for (var col = 0; col < cols; col++) {
-        final x = col * cellWidth;
         bgPaint.color = Color(0xFF000000 | grid.bgAt(row, col));
-        canvas.drawRect(Rect.fromLTWH(x, y, cellWidth, cellHeight), bgPaint);
-
-        final cp = grid.codepointAt(row, col);
-        if (cp != 32 && cp != 0) {
-          final paragraph = glyphs.tryGet(cp, grid.fgAt(row, col));
-          if (paragraph != null) {
-            canvas.drawParagraph(paragraph, Offset(x, y));
-          } else {
-            needsWarmupFrame = true;
-          }
-        }
+        canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
       }
     }
 
-    if (needsWarmupFrame) {
-      SchedulerBinding.instance.scheduleFrame();
+    // Pass 2: glyphs.
+    var needsWarmupFrame = false;
+    for (var row = 0; row < rows; row++) {
+      final y = row * cellHeight;
+      for (var col = 0; col < cols; col++) {
+        final flags = grid.flagsAt(row, col);
+        if (flags & kFlagWideSpacer != 0) continue; // covered by the wide glyph at col-1
+        final cp = grid.codepointAt(row, col);
+        if (cp == 32 || cp == 0) continue;
+        final paragraph =
+            glyphs.tryGet(cp, grid.fgAt(row, col), wide: flags & kFlagWide != 0);
+        if (paragraph != null) {
+          canvas.drawParagraph(paragraph, Offset(col * cellWidth, y));
+        } else {
+          needsWarmupFrame = true;
+        }
+      }
     }
+    if (needsWarmupFrame) SchedulerBinding.instance.scheduleFrame();
 
+    // Cursor — spans two cells when sitting on a wide char.
     if (grid.cursorVisible) {
+      final onWide = grid.cursorRow < rows &&
+          grid.cursorCol < cols &&
+          grid.flagsAt(grid.cursorRow, grid.cursorCol) & kFlagWide != 0;
+      final cw = onWide ? cellWidth * 2 : cellWidth;
       canvas.drawRect(
-        Rect.fromLTWH(grid.cursorCol * cellWidth, grid.cursorRow * cellHeight, cellWidth, cellHeight),
+        Rect.fromLTWH(grid.cursorCol * cellWidth, grid.cursorRow * cellHeight, cw, cellHeight),
         Paint()..color = const Color(0x88FFFFFF),
       );
     }
