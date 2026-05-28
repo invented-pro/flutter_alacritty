@@ -37,6 +37,20 @@ Rect cursorRect(int shape, double cellWidth, double cellHeight, double lineWidth
   }
 }
 
+/// Override the cell's effective colors when it carries a search-match flag.
+/// Focused match wins over plain match; otherwise the input pair is returned
+/// unchanged. Pure — exposed for unit testing the match-highlight invariant.
+({int fg, int bg}) applySearchOverride(
+    int flags, ({int fg, int bg}) ec, SearchColors colors) {
+  if (flags & kFlagMatchCurrent != 0) {
+    return (fg: colors.focusedFg, bg: colors.focusedBg);
+  }
+  if (flags & kFlagMatch != 0) {
+    return (fg: colors.matchFg, bg: colors.matchBg);
+  }
+  return ec;
+}
+
 class SearchColors {
   const SearchColors({
     required this.matchBg,
@@ -71,15 +85,8 @@ class TerminalPainter extends CustomPainter {
   final SearchColors searchColors;
   final int _paintGeneration;
 
-  ({int fg, int bg}) _withSearch(int flags, ({int fg, int bg}) ec) {
-    if (flags & kFlagMatchCurrent != 0) {
-      return (fg: searchColors.focusedFg, bg: searchColors.focusedBg);
-    }
-    if (flags & kFlagMatch != 0) {
-      return (fg: searchColors.matchFg, bg: searchColors.matchBg);
-    }
-    return ec;
-  }
+  ({int fg, int bg}) _withSearch(int flags, ({int fg, int bg}) ec) =>
+      applySearchOverride(flags, ec, searchColors);
 
   @override
   void paint(Canvas canvas, Size size) {

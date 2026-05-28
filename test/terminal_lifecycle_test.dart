@@ -216,6 +216,15 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(find.byType(TerminalSearchBar), findsOneWidget);
+    // And the SAME hotkey closes it again (regression: the _searchOpen guard
+    // used to swallow Ctrl+Shift+F before the toggle branch could fire).
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(find.byType(TerminalSearchBar), findsNothing);
     title.dispose();
   });
 

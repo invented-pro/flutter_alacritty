@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../config/terminal_config.dart';
@@ -198,8 +197,22 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _restart();
       return KeyEventResult.handled;
     }
-    if (_searchOpen) return KeyEventResult.ignored;
     final hw = HardwareKeyboard.instance;
+    // Ctrl+Shift+F toggles the search bar — handled BEFORE the _searchOpen
+    // early-return below so the same hotkey can close the bar (when open, the
+    // search bar's TextField has focus; this combo isn't a printable char and
+    // bubbles up to this parent Focus).
+    if (hw.isControlPressed &&
+        hw.isShiftPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyF) {
+      setState(() {
+        _searchOpen = !_searchOpen;
+        if (!_searchOpen) _searchInvalid = false;
+      });
+      if (!_searchOpen) _client?.searchClear();
+      return KeyEventResult.handled;
+    }
+    if (_searchOpen) return KeyEventResult.ignored;
     if (hw.isControlPressed &&
         hw.isShiftPressed &&
         event.logicalKey == LogicalKeyboardKey.keyV) {
@@ -213,16 +226,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
       if (text != null && text.isNotEmpty) {
         Clipboard.setData(ClipboardData(text: text));
       }
-      return KeyEventResult.handled;
-    }
-    if (hw.isControlPressed &&
-        hw.isShiftPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyF) {
-      setState(() {
-        _searchOpen = !_searchOpen;
-        if (!_searchOpen) _searchInvalid = false;
-      });
-      if (!_searchOpen) _client?.searchClear();
       return KeyEventResult.handled;
     }
     final bytes = encodeKey(

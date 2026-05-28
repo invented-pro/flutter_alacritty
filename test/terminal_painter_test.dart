@@ -104,33 +104,27 @@ void main() {
     expect(isSelected(grid.flagsAt(0, 1)), isFalse);
   });
 
-  test('current-match cell paints the focused search background', () {
-    final grid = MirrorGrid()
-      ..apply(GridUpdate(
-        full: true, rows: 1, columns: 1,
-        lines: [
-          LineCells(
-            line: 0,
-            codepoints: Int32List.fromList([0x41]), // 'A'
-            fg: Int32List.fromList([0xD8D8D8]),
-            bg: Int32List.fromList([0x181818]),
-            flags: Uint16List.fromList([kFlagMatch | kFlagMatchCurrent]),
-          )
-        ],
-        cursorRow: 0, cursorCol: 0, cursorVisible: false,
-      ));
-    final rec = PictureRecorder();
-    final canvas = Canvas(rec);
-    TerminalPainter(
-      grid: grid,
-      glyphs: GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8),
-      cellWidth: 8,
-      cellHeight: 16,
-      blinkOn: ValueNotifier(true),
-      selectionColor: 0x553A6EA5,
-      searchColors: const SearchColors(
-        matchBg: 0xAC4242, matchFg: 0x181818, focusedBg: 0xF4BF75, focusedFg: 0x181818),
-    ).paint(canvas, const Size(8, 16));
-    expect(rec.endRecording(), isNotNull);
+  group('applySearchOverride', () {
+    const cells = SearchColors(
+      matchBg: 0xAC4242, matchFg: 0x181818, focusedBg: 0xF4BF75, focusedFg: 0x181818);
+    const base = (fg: 0xD8D8D8, bg: 0x222222);
+
+    test('no match flag passes the base pair through', () {
+      expect(applySearchOverride(0, base, cells), base);
+    });
+    test('FLAG_MATCH alone returns the matches colors', () {
+      final r = applySearchOverride(kFlagMatch, base, cells);
+      expect(r.bg, 0xAC4242);
+      expect(r.fg, 0x181818);
+    });
+    test('FLAG_MATCH_CURRENT returns the focused colors (wins over plain match)', () {
+      final r = applySearchOverride(kFlagMatch | kFlagMatchCurrent, base, cells);
+      expect(r.bg, 0xF4BF75);
+      expect(r.fg, 0x181818);
+    });
+    test('current-match alone (without plain match bit) still picks focused', () {
+      final r = applySearchOverride(kFlagMatchCurrent, base, cells);
+      expect(r.bg, 0xF4BF75);
+    });
   });
 }
