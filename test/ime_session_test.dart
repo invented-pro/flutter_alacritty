@@ -57,6 +57,17 @@ void main() {
       expect(preedits, ['n', 'ni', null]);
       expect(commits, ['你']);
     });
+
+    test('isComposing true only during active composing range', () {
+      final s = ImeSession(onCommit: (_) {}, onPreeditChanged: (_) {});
+      expect(s.isComposing, isFalse);
+      s.updateEditingValue(
+        const TextEditingValue(text: 'ni', composing: TextRange(start: 0, end: 2)),
+      );
+      expect(s.isComposing, isTrue);
+      s.updateEditingValue(const TextEditingValue(text: '你'));
+      expect(s.isComposing, isFalse);
+    });
   });
 
   test('connectionClosed triggers detach (preedit cleared, no double-fire)', () {
@@ -68,6 +79,25 @@ void main() {
     s.connectionClosed();
     expect(preedit, isNull);
     expect(s.isAttached, isFalse);
+  });
+
+  test('platform-side connectionClosed mid-composition resets isComposing + clears preedit', () {
+    final preedits = <String?>[];
+    final commits = <String>[];
+    final s = ImeSession(onCommit: commits.add, onPreeditChanged: preedits.add);
+    // Mimic the production sequence: enter composing state, then the platform
+    // tears the connection down (e.g. window blur, IM crash). The gate in
+    // TerminalScreen._onKey reads `isAttached && isComposing` — both must
+    // flip back to false so ASCII falls back to encodeKey.
+    s.updateEditingValue(
+      const TextEditingValue(text: 'ni', composing: TextRange(start: 0, end: 2)),
+    );
+    expect(s.isComposing, isTrue);
+    s.connectionClosed();
+    expect(s.isComposing, isFalse);
+    expect(s.isAttached, isFalse);
+    expect(preedits.last, isNull);
+    expect(commits, isEmpty); // composing was dropped, not committed
   });
 
   test('detach when never attached is a safe no-op', () {

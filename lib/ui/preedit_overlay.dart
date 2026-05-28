@@ -1,10 +1,10 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 /// Floating preedit (composing) string drawn just below the cursor cell.
 ///
 /// The OS IM (fcitx / IBus / etc.) draws its OWN candidate window adjacent to
-/// the cursor — we only render the active preedit substring. When [text] is
-/// null or empty, the widget collapses to nothing.
+/// the cursor — we only render the active preedit substring. Callers should
+/// gate construction so this widget is only mounted while [text] is non-empty.
 class PreeditOverlay extends StatelessWidget {
   const PreeditOverlay({
     required this.text,
@@ -17,22 +17,22 @@ class PreeditOverlay extends StatelessWidget {
   });
 
   /// The composing substring (`composing.textInside(value.text)` from ImeSession).
-  final String? text;
+  final String text;
 
   /// Local-coordinates rect of the cursor cell. The overlay floats just below
   /// it (`cursorRect.bottom + 2`).
   final Rect cursorRect;
 
-  /// Packed RGB (0x00RRGGBB) for background; rendered with full alpha.
+  /// Packed RGB (0x00RRGGBB); alpha is forced to full when rendered.
   final int bg;
+
+  /// Packed RGB (0x00RRGGBB); alpha is forced to full when rendered.
   final int fg;
   final bool underline;
   final TextStyle textStyle;
 
   @override
   Widget build(BuildContext context) {
-    final t = text;
-    if (t == null || t.isEmpty) return const SizedBox.shrink();
     return Positioned(
       left: cursorRect.left,
       top: cursorRect.bottom + 2,
@@ -44,7 +44,7 @@ class PreeditOverlay extends StatelessWidget {
             borderRadius: BorderRadius.circular(2),
           ),
           child: Text(
-            t,
+            text,
             style: textStyle.copyWith(
               color: Color(0xFF000000 | fg),
               decoration: underline ? TextDecoration.underline : TextDecoration.none,

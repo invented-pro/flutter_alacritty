@@ -18,7 +18,12 @@ class ImeSession implements TextInputClient {
   final void Function(String? preedit) onPreeditChanged;
 
   TextInputConnection? _conn;
+  bool _composing = false;
+
   bool get isAttached => _conn != null && _conn!.attached;
+
+  /// True while the platform IM has an active composing range (preedit).
+  bool get isComposing => _composing;
 
   /// Open a platform TextInput session. Idempotent.
   void attach() {
@@ -40,8 +45,10 @@ class ImeSession implements TextInputClient {
 
   /// Close the session and clear any visible preedit. Safe to call when not
   /// attached.
-  void detach() {
-    onPreeditChanged(null);
+  /// [notify] — when false, skip [onPreeditChanged] (e.g. widget [dispose]).
+  void detach({bool notify = true}) {
+    _composing = false;
+    if (notify) onPreeditChanged(null);
     _conn?.close();
     _conn = null;
   }
@@ -59,9 +66,11 @@ class ImeSession implements TextInputClient {
   void updateEditingValue(TextEditingValue value) {
     final composing = value.composing;
     if (composing.isValid && !composing.isCollapsed) {
+      _composing = true;
       onPreeditChanged(composing.textInside(value.text));
       return;
     }
+    _composing = false;
     if (value.text.isNotEmpty) {
       onCommit(value.text);
       _conn?.setEditingState(TextEditingValue.empty);

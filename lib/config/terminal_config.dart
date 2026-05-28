@@ -147,6 +147,8 @@ class ImeConfig {
 
   /// Background color for the preedit overlay (packed RGB; alpha is forced to full).
   final int preeditBg;
+
+  /// Foreground color for the preedit overlay (packed RGB; alpha is forced to full).
   final int preeditFg;
   final bool underline;
 

@@ -44,6 +44,9 @@ class _ClearOnTapBinding extends _FakeBinding {
 class _FakeBinding implements EngineBinding {
   int scrollCalls = 0;
   int selStartCalls = 0;
+  int selClearCalls = 0;
+  int scrollToBottomCalls = 0;
+  int fullSnapshotCalls = 0;
   /// Forwarded into emitted GridUpdates so tests can flip kModeBracketedPaste
   /// etc. on the mirror grid via the existing refresh path.
   int modeFlags = 0;
@@ -118,7 +121,9 @@ class _FakeBinding implements EngineBinding {
     scrollCalls++;
   }
   @override
-  Future<void> scrollToBottom() async {}
+  Future<void> scrollToBottom() async {
+    scrollToBottomCalls++;
+  }
   @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) {
     selStartCalls++;
@@ -126,7 +131,9 @@ class _FakeBinding implements EngineBinding {
   @override
   void selectionUpdate(int displayRow, int col, bool rightHalf) {}
   @override
-  void selectionClear() {}
+  void selectionClear() {
+    selClearCalls++;
+  }
   @override
   String? selectionText() => null;
   @override
@@ -138,7 +145,10 @@ class _FakeBinding implements EngineBinding {
   @override
   void searchClear() {}
   @override
-  GridUpdate fullSnapshotSearched() => _hyperlinkSnapshot();
+  GridUpdate fullSnapshotSearched() {
+    fullSnapshotCalls++;
+    return _hyperlinkSnapshot();
+  }
   @override
   String? resolveHyperlink(int id) => hyperlinkUris[id];
   @override
@@ -315,9 +325,9 @@ void main() {
     title.dispose();
   });
 
-  testWidgets('tap clears selection', (tester) async {
+  testWidgets('tap clears selection when one is active; no-op when not', (tester) async {
     final title = ValueNotifier<String>('t');
-    var cleared = false;
+    var clears = 0;
     await tester.pumpWidget(MaterialApp(
       home: TerminalScreen(
         title: title,
@@ -330,16 +340,23 @@ void main() {
           required onBell,
           required onClipboard,
           required engineConfig,
-        }) => _ClearOnTapBinding(() => cleared = true),
+        }) => _ClearOnTapBinding(() => clears++),
       ),
     ));
     await tester.pump();
-    await tester.tap(
-      find.byType(CustomPaint).first,
-      kind: PointerDeviceKind.touch,
-    );
+    // First tap with no active selection: must NOT call selectionClear (gated;
+    // mirrors alacritty event.rs:clear_selection, which is a no-op on empty).
+    await tester.tap(find.byType(CustomPaint).first, kind: PointerDeviceKind.touch);
     await tester.pump();
-    expect(cleared, isTrue);
+    expect(clears, 0,
+        reason: 'tap with no active selection must skip the FFI clear + full snapshot');
+    // Establish a selection via long-press, then tap: must call clear exactly once.
+    final center = tester.getCenter(find.byType(CustomPaint).first);
+    await tester.longPressAt(center);
+    await tester.pump();
+    await tester.tap(find.byType(CustomPaint).first, kind: PointerDeviceKind.touch);
+    await tester.pump();
+    expect(clears, 1);
     title.dispose();
   });
 
@@ -583,8 +600,14 @@ void main() {
       }) => binding,
     )));
     await tester.pump();
-    // Sync engine mode flags into the mirror grid (same path as selection refresh).
-    await tester.tap(find.byType(CustomPaint).first);
+    // Sync engine mode flags (kModeBracketedPaste) into the mirror grid.
+    // The selectionStart → tap path is now the only cheap test hook that
+    // triggers refreshSelection — `_onTerminalInputStart`'s clear+refresh
+    // path runs because long-press has flagged `_selectionActive = true`.
+    final center = tester.getCenter(find.byType(CustomPaint).first);
+    await tester.longPressAt(center);
+    await tester.pump();
+    await tester.tap(find.byType(CustomPaint).first, kind: PointerDeviceKind.touch);
     await tester.pump();
     final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
     (state as dynamic).simulateDrop([
@@ -628,7 +651,7 @@ void main() {
     title.dispose();
   });
 
-  testWidgets('PreeditOverlay shows while composing and hides after commit', (tester) async {
+  testWidgets('PreeditOverlay mounts only while composing', (tester) async {
     final title = ValueNotifier<String>('t');
     await tester.pumpWidget(MaterialApp(home: TerminalScreen(
       title: title,
@@ -642,18 +665,81 @@ void main() {
     await tester.pump();
     final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
     final ime = (state as dynamic).imeForTest as ImeSession;
-    PreeditOverlay overlay() => tester.widget<PreeditOverlay>(find.byType(PreeditOverlay));
-    expect(overlay().text, anyOf(isNull, isEmpty));
+    expect(find.byType(PreeditOverlay), findsNothing);
     ime.updateEditingValue(const TextEditingValue(text: 'ni', composing: TextRange(start: 0, end: 2)));
     await tester.pump();
-    expect(overlay().text, 'ni');
+    expect(tester.widget<PreeditOverlay>(find.byType(PreeditOverlay)).text, 'ni');
     ime.updateEditingValue(const TextEditingValue(text: '你好'));
     await tester.pump();
-    expect(overlay().text, anyOf(isNull, isEmpty));
+    expect(find.byType(PreeditOverlay), findsNothing);
     title.dispose();
   });
 
-  testWidgets('_onKey gate: printable+no-modifier with attached IME is ignored;'
+  testWidgets('ASCII with IME attached but not composing reaches the PTY via encodeKey',
+      (tester) async {
+    final title = ValueNotifier<String>('t');
+    final pty = _FakePty();
+    await tester.pumpWidget(MaterialApp(home: TerminalScreen(
+      title: title,
+      ptyFactory: ({required rows, required columns}) => pty,
+      engineFactory: ({
+        required columns, required rows,
+        required onPtyWrite, required onTitle,
+        required onBell, required onClipboard, required engineConfig,
+      }) => _FakeBinding(),
+    )));
+    await tester.pump();
+    await tester.tap(find.byType(CustomPaint).first);
+    await tester.pump();
+    final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
+    final ime = (state as dynamic).imeForTest as ImeSession;
+    expect(ime.isAttached, isTrue);
+    expect(ime.isComposing, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.pump();
+    expect(pty.writes, isNotEmpty,
+        reason: 'English/direct input must use encodeKey, not TextInput');
+    title.dispose();
+  });
+
+  testWidgets('typing on the hot path is FFI-snapshot-free when no selection and at bottom', (tester) async {
+    // The reason this matters: per-keystroke full grid snapshot is what caused
+    // the input lag investigated against alacritty event.rs:on_terminal_input_start.
+    // Alacritty only marks dirty when there's actually a selection to clear or
+    // a scrollback offset to scroll past — we mirror that here.
+    final title = ValueNotifier<String>('t');
+    final pty = _FakePty();
+    final binding = _FakeBinding();
+    await tester.pumpWidget(MaterialApp(home: TerminalScreen(
+      title: title,
+      ptyFactory: ({required rows, required columns}) => pty,
+      engineFactory: ({
+        required columns, required rows,
+        required onPtyWrite, required onTitle,
+        required onBell, required onClipboard, required engineConfig,
+      }) => binding,
+    )));
+    await tester.pumpAndSettle();
+    // Engine startup may snapshot once via refreshView paths (resize, etc.).
+    // Snapshot the post-startup baseline; the per-key delta below is what we
+    // actually care about.
+    final baselineSnapshots = binding.fullSnapshotCalls;
+    final baselineClears = binding.selClearCalls;
+    final baselineScrollBottom = binding.scrollToBottomCalls;
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.pump();
+    expect(pty.writes, isNotEmpty,
+        reason: 'the keystroke still reaches the PTY');
+    expect(binding.selClearCalls, baselineClears,
+        reason: 'no selection → no selectionClear FFI hop');
+    expect(binding.scrollToBottomCalls, baselineScrollBottom,
+        reason: 'displayOffset == 0 → no scrollToBottom FFI hop');
+    expect(binding.fullSnapshotCalls, baselineSnapshots,
+        reason: 'no state change → no full snapshot (alacritty parity)');
+    title.dispose();
+  });
+
+  testWidgets('_onKey gate: printable+no-modifier while composing is ignored;'
               ' Ctrl+Shift+C still copies through encodeKey path', (tester) async {
     final title = ValueNotifier<String>('t');
     final pty = _FakePty();
@@ -674,7 +760,13 @@ void main() {
     final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
     final ime = (state as dynamic).imeForTest as ImeSession;
     expect(ime.isAttached, isTrue, reason: 'focused terminal should attach IME');
-    // Plain 'a' with no modifier: the gate should swallow it (TextInput path owns this character).
+    // Simulate active pinyin composition so the gate applies.
+    ime.updateEditingValue(
+      const TextEditingValue(text: 'a', composing: TextRange(start: 0, end: 1)),
+    );
+    await tester.pump();
+    expect(ime.isComposing, isTrue);
+    // Plain 'a' with no modifier while composing: defer to TextInput, not encodeKey.
     await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
     await tester.pump();
     expect(pty.writes, isEmpty,

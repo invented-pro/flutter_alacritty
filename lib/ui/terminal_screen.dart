@@ -135,6 +135,12 @@ class _TerminalScreenState extends State<TerminalScreen>
         Duration(milliseconds: _config.cursor.blinkInterval), (_) {
       _blinkOn.value = !_blinkOn.value;
     });
+    // Focus listeners belong to the lifetime of the State, not _start(): a
+    // spawn failure (caught below) must not strand the IME without a focus
+    // listener, and autofocus fires before _start runs (post-frame ordering)
+    // so registering here ensures the very first focus event is caught.
+    _focus.addListener(_reportFocus);
+    _focus.addListener(_handleImeFocusChange);
   }
 
   TerminalEngineClient? _client;
@@ -146,6 +152,12 @@ class _TerminalScreenState extends State<TerminalScreen>
   int _clickCount = 0;
   DateTime _lastClick = DateTime.fromMillisecondsSinceEpoch(0);
   bool _selecting = false;
+  // Mirrors engine selection presence on the Dart side so the per-keystroke
+  // `selectionClear + full snapshot` only runs when there is something to clear
+  // (alacritty event.rs:on_terminal_input_start does the same — dirty bit is
+  // OR'd only when the taken selection was non-empty).
+  bool _selectionActive = false;
+  Rect? _lastReportedCaretRect;
   String _primary = '';
   TermStatus _status = TermStatus.running;
   int? _exitCode;
@@ -205,8 +217,6 @@ class _TerminalScreenState extends State<TerminalScreen>
         onDone: () => _exitIfCurrent(pty, null),
       );
       pty.exitCode.then((code) => _exitIfCurrent(pty, code));
-      _focus.addListener(_reportFocus);
-      _focus.addListener(_handleImeFocusChange);
       _status = TermStatus.running;
       _exitCode = null;
       _errorMessage = null;
@@ -228,8 +238,6 @@ class _TerminalScreenState extends State<TerminalScreen>
 
   void _restart() {
     _outputSub?.cancel();
-    _focus.removeListener(_reportFocus);
-    _focus.removeListener(_handleImeFocusChange);
     _ime.detach();
     _pty?.kill();
     _client?.dispose();
@@ -330,7 +338,11 @@ class _TerminalScreenState extends State<TerminalScreen>
       }
       return KeyEventResult.handled;
     }
+    // Only defer to TextInput while the IM is actively composing. When attached
+    // but not composing (e.g. fcitx "英" mode), GTK does not deliver ASCII via
+    // updateEditingValue — encodeKey must handle those keys.
     if (_ime.isAttached &&
+        _ime.isComposing &&
         event.character != null &&
         event.character!.isNotEmpty &&
         !hw.isControlPressed &&
@@ -348,11 +360,26 @@ class _TerminalScreenState extends State<TerminalScreen>
       modeFlags: _grid.modeFlags,
     );
     if (bytes == null) return KeyEventResult.ignored;
-    _client?.scrollToBottom();
-    _client?.binding.selectionClear();
-    _refreshSelection();
+    _onTerminalInputStart();
     _pty?.write(bytes);
     return KeyEventResult.handled;
+  }
+
+  /// Mirror alacritty event.rs:on_terminal_input_start. Both side-effects are
+  /// no-ops when already in the desired state, so the expensive full-grid FFI
+  /// snapshot is skipped on the common typing path (no selection, at bottom).
+  /// scrollToBottom internally calls refreshView, so when it fires we skip the
+  /// follow-up _refreshSelection to avoid a second snapshot.
+  void _onTerminalInputStart() {
+    final scrolledBack = _grid.displayOffset != 0;
+    if (scrolledBack) {
+      _client?.scrollToBottom();
+    }
+    if (_selectionActive) {
+      _client?.binding.selectionClear();
+      _selectionActive = false;
+      if (!scrolledBack) _refreshSelection();
+    }
   }
 
   void _searchChanged(String pattern) {
@@ -377,6 +404,7 @@ class _TerminalScreenState extends State<TerminalScreen>
     final data = await Clipboard.getData('text/plain');
     final text = data?.text;
     if (text == null || text.isEmpty || _pty == null) return;
+    _onTerminalInputStart();
     _pty!.write(pasteBytes(text, modeFlags: _grid.modeFlags));
   }
 
@@ -438,6 +466,7 @@ class _TerminalScreenState extends State<TerminalScreen>
     final paths = details.files.map((f) => f.path).where((p) => p.isNotEmpty);
     if (paths.isEmpty) return;
     final joined = paths.map(_shellQuote).join(' ');
+    _onTerminalInputStart();
     _pty?.write(pasteBytes(joined, modeFlags: _grid.modeFlags));
   }
 
@@ -464,6 +493,7 @@ class _TerminalScreenState extends State<TerminalScreen>
       _ime.attach();
     } else {
       _ime.detach();
+      _lastReportedCaretRect = null;
     }
   }
 
@@ -488,8 +518,13 @@ class _TerminalScreenState extends State<TerminalScreen>
       _metrics.width,
       _metrics.height,
     );
-    final origin = renderBox.localToGlobal(localRect.topLeft);
-    _ime.setCaretRect(origin & localRect.size);
+    final globalRect = renderBox.localToGlobal(localRect.topLeft) & localRect.size;
+    // build() schedules this on every post-frame; skip the platform-channel IPC
+    // when the rect hasn't moved (the common case while typing into a stable
+    // line). Reset on detach so a re-attach always re-reports.
+    if (globalRect == _lastReportedCaretRect) return;
+    _lastReportedCaretRect = globalRect;
+    _ime.setCaretRect(globalRect);
   }
 
   (int, int, bool) _cellAt(Offset local) {
@@ -573,7 +608,7 @@ class _TerminalScreenState extends State<TerminalScreen>
     _grid.dispose();
     _focus.removeListener(_reportFocus);
     _focus.removeListener(_handleImeFocusChange);
-    _ime.detach();
+    _ime.detach(notify: false);
     _focus.dispose();
     _bellCtrl.dispose();
     super.dispose();
@@ -631,12 +666,14 @@ class _TerminalScreenState extends State<TerminalScreen>
                   final (r, c, rh) = _cellAt(e.localPosition);
                   _client!.binding.selectionStart(r, c, rh, _clickCount - 1);
                   _selecting = true;
+                  _selectionActive = true;
                   _refreshSelection();
                   return;
                 }
                 if (!anyMouse(_grid.modeFlags) &&
                     e.buttons & kMiddleMouseButton != 0 &&
                     _primary.isNotEmpty) {
+                  _onTerminalInputStart();
                   _pty?.write(pasteBytes(_primary, modeFlags: _grid.modeFlags));
                   return;
                 }
@@ -711,8 +748,9 @@ class _TerminalScreenState extends State<TerminalScreen>
                     return;
                   }
                   _focus.requestFocus();
-                  if (_client != null) {
+                  if (_client != null && _selectionActive) {
                     _client!.binding.selectionClear();
+                    _selectionActive = false;
                     _refreshSelection();
                   }
                 },
@@ -740,6 +778,7 @@ class _TerminalScreenState extends State<TerminalScreen>
                   final (r, c, rh) = _cellAt(e.localPosition);
                   _client!.binding.selectionStart(r, c, rh, 0);
                   _selecting = true;
+                  _selectionActive = true;
                   _refreshSelection();
                 },
                 onLongPressMoveUpdate: (e) {
@@ -828,19 +867,20 @@ class _TerminalScreenState extends State<TerminalScreen>
                           color: Color(0xFF000000 | _config.bell.color)),
                     ),
                   ),
-                  PreeditOverlay(
-                    text: _preedit,
-                    cursorRect: Rect.fromLTWH(
-                      _grid.cursorCol * _metrics.width,
-                      _grid.cursorRow * _metrics.height,
-                      _metrics.width,
-                      _metrics.height,
+                  if (_preedit != null && _preedit!.isNotEmpty)
+                    PreeditOverlay(
+                      text: _preedit!,
+                      cursorRect: Rect.fromLTWH(
+                        _grid.cursorCol * _metrics.width,
+                        _grid.cursorRow * _metrics.height,
+                        _metrics.width,
+                        _metrics.height,
+                      ),
+                      bg: _config.ime.preeditBg,
+                      fg: _config.ime.preeditFg,
+                      underline: _config.ime.underline,
+                      textStyle: _style,
                     ),
-                    bg: _config.ime.preeditBg,
-                    fg: _config.ime.preeditFg,
-                    underline: _config.ime.underline,
-                    textStyle: _style,
-                  ),
                 ],
               ),
               ),
