@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::event_proxy::{EngineEvent, EventProxy, EventQueue};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Direction, Line, Point, Side};
+use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
@@ -267,11 +267,12 @@ impl TerminalEngine {
         let off = self.term.grid().display_offset();
         let rows = self.term.screen_lines();
         let cols = self.term.columns();
-        // Origin: just past the current match in the search direction; else the
-        // appropriate viewport corner.
+        // Origin must be ONE POINT past the current match's boundary in the
+        // search direction (alacritty's `advance_search_origin`). Using the
+        // boundary itself can re-find the current match → no visible change.
         let origin = match (&self.current_match, direction) {
-            (Some(m), Direction::Right) => *m.end(),
-            (Some(m), Direction::Left) => *m.start(),
+            (Some(m), Direction::Right) => m.end().add(&self.term, Boundary::None, 1),
+            (Some(m), Direction::Left) => m.start().sub(&self.term, Boundary::None, 1),
             (None, Direction::Right) => viewport_to_point(off, Point::new(0, Column(0))),
             (None, Direction::Left) => {
                 viewport_to_point(off, Point::new(rows - 1, Column(cols - 1)))
@@ -791,6 +792,23 @@ mod tests {
         let u = e.full_snapshot_searched();
         assert_ne!(u.lines[0].cells[8].flags & FLAG_MATCH_CURRENT, 0);
         assert_eq!(u.lines[0].cells[0].flags & FLAG_MATCH_CURRENT, 0);
+    }
+
+    #[test]
+    fn search_prev_walks_back_then_re_finds_the_first_match() {
+        // Regression: origin was sitting AT m.start() for Direction::Left, so
+        // search_next could re-find the current match → no visible change.
+        // Fix uses Point::sub(.., Boundary::None, 1) to step past it.
+        let mut e = engine(20, 5);
+        e.advance(b"foo bar foo".to_vec());
+        e.search_set("foo".to_string());      // first "foo" (col 0) focused
+        assert!(e.search_next());              // second "foo" (col 8) focused
+        let u1 = e.full_snapshot_searched();
+        assert_ne!(u1.lines[0].cells[8].flags & FLAG_MATCH_CURRENT, 0);
+        assert!(e.search_prev());              // back to first "foo"
+        let u2 = e.full_snapshot_searched();
+        assert_ne!(u2.lines[0].cells[0].flags & FLAG_MATCH_CURRENT, 0);
+        assert_eq!(u2.lines[0].cells[8].flags & FLAG_MATCH_CURRENT, 0);
     }
 
     #[test]
