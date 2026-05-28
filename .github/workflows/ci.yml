@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lib/**"
+      - "test/**"
+      - "integration_test/**"
+      - "packages/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "analysis_options.yaml"
+      - "flutter_rust_bridge.yaml"
+      - "distribute_options.yaml"
+      - "assets/**"
+      - "linux/**"
+      - "windows/**"
+      - "macos/**"
+      - "android/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "lib/**"
+      - "test/**"
+      - "integration_test/**"
+      - "packages/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "analysis_options.yaml"
+      - "flutter_rust_bridge.yaml"
+      - "distribute_options.yaml"
+      - "assets/**"
+      - "linux/**"
+      - "windows/**"
+      - "macos/**"
+      - "android/**"
+      - ".github/workflows/**"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-test:
+    name: Analyze & test (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: Linux
+            install_linux_deps: true
+          - os: windows-latest
+            label: Windows
+            install_linux_deps: false
+          - os: macos-latest
+            label: macOS
+            install_linux_deps: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux build dependencies
+        if: matrix.install_linux_deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake git ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib test
+
+      - name: Unit tests
+        run: flutter test test/
+
+  package-linux:
+    name: Package Linux (deb + AppImage)
+    runs-on: ubuntu-22.04
+    needs: analyze-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux build & packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake git ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev \
+            dpkg fakeroot file libfuse2 locate
+          wget -qO /tmp/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          sudo mv /tmp/appimagetool /usr/local/bin/appimagetool
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Activate fastforge
+        run: dart pub global activate fastforge
+
+      - name: Add pub-cache to PATH
+        run: echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Package deb and AppImage
+        run: fastforge release --name dev
+
+      - name: Verify Linux packages
+        run: |
+          version=$(grep -E '^version:' pubspec.yaml | head -1 | sed 's/version:[[:space:]]*//' | cut -d+ -f1)
+          dist_dir="dist/${version}"
+          test -d "$dist_dir"
+          ls -la "$dist_dir"
+          test -f "${dist_dir}/flutter_alacritty-${version}-linux.deb"
+          test -f "${dist_dir}/flutter_alacritty-${version}-linux.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/**/*
+          if-no-files-found: error

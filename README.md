@@ -2,6 +2,10 @@
 
 Flutter terminal widget powered by an [Alacritty](https://github.com/alacritty/alacritty)-based Rust engine, with PTY support via [`flutter_pty`](https://pub.dev/packages/flutter_pty).
 
+## Screenshots
+
+![Flutter Alacritty terminal](assets/imgs/image.png)
+
 ## Requirements
 
 - Flutter 3.3+
@@ -46,6 +50,18 @@ git submodule update --init --recursive
 ```
 
 The [`rust_lib_flutter_alacritty`](https://github.com/hhoao/rust_lib_flutter_alacritty) plugin lives in `packages/rust_lib_flutter_alacritty/` as a git submodule.
+
+## Package Linux (deb + AppImage)
+
+See [linux/packaging/README.md](linux/packaging/README.md) for detailed steps. Briefly:
+
+```bash
+dart pub global activate fastforge
+git submodule update --init --recursive
+flutter pub get
+fastforge release --name dev
+# Output: dist/{version}/flutter_alacritty-{version}-linux.deb, etc.
+```
 
 ## Run the demo app (from git checkout)
 

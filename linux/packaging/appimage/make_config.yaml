@@ -1,0 +1,5 @@
+display_name: Flutter Alacritty
+icon: assets/icons/icon.png
+categories:
+  - System
+  - TerminalEmulator

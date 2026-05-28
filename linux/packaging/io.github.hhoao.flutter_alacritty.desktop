@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Flutter Alacritty
+GenericName=Terminal Emulator
+Comment=Alacritty-based terminal emulator for Flutter
+Exec=flutter_alacritty %U
+Icon=io.github.hhoao.flutter_alacritty
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupNotify=true
+StartupWMClass=io.github.hhoao.flutter_alacritty

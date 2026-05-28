@@ -1,0 +1,226 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (branch / tag / sha). Leave empty for current."
+        required: false
+        default: ""
+
+jobs:
+  build-linux:
+    name: Linux (deb + AppImage)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          submodules: recursive
+
+      - name: Install Linux build & packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake git ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev \
+            dpkg fakeroot file libfuse2 locate
+          wget -qO /tmp/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          sudo mv /tmp/appimagetool /usr/local/bin/appimagetool
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Activate fastforge
+        run: dart pub global activate fastforge
+
+      - name: Add pub-cache to PATH
+        run: echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Package deb and AppImage
+        run: fastforge release --name dev
+
+      - name: Verify Linux packages
+        run: |
+          version=$(grep -E '^version:' pubspec.yaml | head -1 | sed 's/version:[[:space:]]*//' | cut -d+ -f1)
+          dist_dir="dist/${version}"
+          test -d "$dist_dir"
+          ls -la "$dist_dir"
+          test -f "${dist_dir}/flutter_alacritty-${version}-linux.deb"
+          test -f "${dist_dir}/flutter_alacritty-${version}-linux.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: dist/**/*
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS (app bundle zip)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Build macOS release
+        run: flutter build macos --release
+
+      - name: Pack macOS app
+        run: |
+          version=$(grep -E '^version:' pubspec.yaml | head -1 | sed 's/version:[[:space:]]*//' | cut -d+ -f1)
+          app="build/macos/Build/Products/Release/flutter_alacritty.app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "flutter_alacritty-${version}-macos.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: flutter_alacritty-*-macos.zip
+          if-no-files-found: error
+
+  build-windows:
+    name: Windows (release zip)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Pack Windows build
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim().Split('+')[0]
+          $src = "build/windows/x64/runner/Release"
+          $zip = "flutter_alacritty-${version}-windows-x64.zip"
+          Compress-Archive -Path $src -DestinationPath $zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: flutter_alacritty-*-windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-linux, build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Collect release files
+        run: |
+          mkdir -p release-files
+          python3 << 'PY'
+          import os, shutil, pathlib, sys
+          artifacts = pathlib.Path("artifacts")
+          out = pathlib.Path("release-files")
+          out.mkdir(parents=True, exist_ok=True)
+          staging_suffixes = ("_deb", "_appimage", "_zip")
+
+          def is_staging(path: pathlib.Path) -> bool:
+              return any(part.endswith(staging_suffixes) for part in path.parts[:-1])
+
+          matched = []
+          has_deb = has_appimage = False
+          zip_count = 0
+          for root, _dirs, files in os.walk(artifacts):
+              for name in files:
+                  p = pathlib.Path(root) / name
+                  if is_staging(p):
+                      continue
+                  low = name.lower()
+                  if low.endswith(".deb"):
+                      has_deb = True
+                      matched.append(p)
+                  elif low.endswith(".appimage"):
+                      has_appimage = True
+                      matched.append(p)
+                  elif low.endswith(".zip"):
+                      zip_count += 1
+                      matched.append(p)
+
+          print("Matched artifact files:")
+          for p in sorted(matched, key=lambda x: str(x)):
+              print(" ", p)
+
+          if not (has_deb and has_appimage and zip_count >= 2):
+              print(
+                  f"ERROR: expected .deb, .AppImage, and >=2 .zip; "
+                  f"got deb={has_deb} appimage={has_appimage} zips={zip_count}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          for p in matched:
+              dest = out / p.name
+              if dest.exists() and dest.resolve() != p.resolve():
+                  print("WARN: duplicate basename, overwriting:", p.name)
+              shutil.copy2(p, dest)
+
+          print("release-files:")
+          for f in sorted(out.iterdir()):
+              print(f"  {f.name}  {f.stat().st_size}")
+          PY
+
+      - name: Generate release notes (Conventional Commits)
+        id: git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --latest --strip header --github-repo ${{ github.repository }}
+        env:
+          OUTPUT: release-notes.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          body_path: ${{ steps.git-cliff.outputs.changelog }}
+          fail_on_unmatched_files: true

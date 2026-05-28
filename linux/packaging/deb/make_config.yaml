@@ -1,0 +1,15 @@
+display_name: Flutter Alacritty
+package_name: flutter_alacritty
+installed_size: 100000
+description: Alacritty-based terminal emulator for Flutter
+maintainer:
+  name: hhoa
+  email: m45937494@gmail.com
+section: utility
+priority: optional
+homepage: https://github.com/hhoao/flutter_alacritty
+icon: assets/icons/icon.png
+dependencies:
+  - libgtk-3-0
+  - libglib2.0-0
+  - libgdk-pixbuf-2.0-0
