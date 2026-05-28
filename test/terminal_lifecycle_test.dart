@@ -27,6 +27,13 @@ class _FakePty implements PtyBackend {
   void kill() => killed = true;
 }
 
+class _ClearOnTapBinding extends _FakeBinding {
+  _ClearOnTapBinding(this.onClear);
+  final void Function() onClear;
+  @override
+  void selectionClear() => onClear();
+}
+
 class _FakeBinding implements EngineBinding {
   int scrollCalls = 0;
   int selStartCalls = 0;
@@ -71,7 +78,7 @@ class _FakeBinding implements EngineBinding {
   @override
   String? selectionText() => null;
   @override
-  bool searchSet(String pattern) => false;
+  bool searchSet(String pattern) => pattern != '(';
   @override
   bool searchNext() => false;
   @override
@@ -160,6 +167,32 @@ void main() {
     title.dispose();
   });
 
+  testWidgets('invalid regex shows error indicator in search bar', (tester) async {
+    final title = ValueNotifier<String>('t');
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalScreen(
+        title: title,
+        ptyFactory: ({required rows, required columns}) => _FakePty(),
+        engineFactory: ({
+          required columns, required rows,
+          required onPtyWrite, required onTitle,
+          required onBell, required onClipboard, required engineConfig,
+        }) => _FakeBinding(),
+      ),
+    ));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), '(');
+    await tester.pump();
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    title.dispose();
+  });
+
   testWidgets('Ctrl+Shift+F toggles the search bar', (tester) async {
     final title = ValueNotifier<String>('t');
     await tester.pumpWidget(MaterialApp(
@@ -212,6 +245,34 @@ void main() {
     );
     await tester.pump();
     expect(binding.scrollCalls, greaterThan(0));
+    title.dispose();
+  });
+
+  testWidgets('tap clears selection', (tester) async {
+    final title = ValueNotifier<String>('t');
+    var cleared = false;
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalScreen(
+        title: title,
+        ptyFactory: ({required rows, required columns}) => _FakePty(),
+        engineFactory: ({
+          required columns,
+          required rows,
+          required onPtyWrite,
+          required onTitle,
+          required onBell,
+          required onClipboard,
+          required engineConfig,
+        }) => _ClearOnTapBinding(() => cleared = true),
+      ),
+    ));
+    await tester.pump();
+    await tester.tap(
+      find.byType(CustomPaint).first,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    expect(cleared, isTrue);
     title.dispose();
   });
 

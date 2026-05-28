@@ -126,7 +126,7 @@ class TerminalEngineClient {
     _pendingRows = null;
     _binding.resize(columns, rows);
     // Engine resize sets TermDamage::Full; sync snapshot keeps MirrorGrid in sync.
-    _grid.apply(_binding.fullSnapshot());
+    refreshView();
   }
 
   Future<void> scrollLines(int delta) async {

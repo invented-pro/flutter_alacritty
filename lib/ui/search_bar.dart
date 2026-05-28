@@ -9,9 +9,11 @@ class TerminalSearchBar extends StatefulWidget {
     required this.onNext,
     required this.onPrev,
     required this.onClose,
+    this.invalidPattern = false,
     super.key,
   });
 
+  final bool invalidPattern;
   final ValueChanged<String> onChanged;
   final VoidCallback onNext;
   final VoidCallback onPrev;
@@ -59,7 +61,13 @@ class _TerminalSearchBarState extends State<TerminalSearchBar> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
-          const Icon(Icons.search, size: 16, color: Color(0xFFBBBBBB)),
+          Icon(
+            widget.invalidPattern ? Icons.error_outline : Icons.search,
+            size: 16,
+            color: widget.invalidPattern
+                ? const Color(0xFFE06C75)
+                : const Color(0xFFBBBBBB),
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Focus(
@@ -70,11 +78,15 @@ class _TerminalSearchBarState extends State<TerminalSearchBar> {
                 autofocus: true,
                 style: const TextStyle(color: Color(0xFFEDEDED), fontSize: 14),
                 cursorColor: const Color(0xFFEDEDED),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   isDense: true,
                   border: InputBorder.none,
-                  hintText: 'search (regex)',
-                  hintStyle: TextStyle(color: Color(0xFF888888)),
+                  hintText: widget.invalidPattern ? 'invalid regex' : 'search (regex)',
+                  hintStyle: TextStyle(
+                    color: widget.invalidPattern
+                        ? const Color(0xFFE06C75)
+                        : const Color(0xFF888888),
+                  ),
                 ),
                 onChanged: widget.onChanged,
                 onSubmitted: (_) => widget.onNext(),

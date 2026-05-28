@@ -99,6 +99,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   int? _exitCode;
   String? _errorMessage;
   bool _searchOpen = false;
+  bool _searchInvalid = false;
   double _touchScrollAccum = 0;
   Timer? _flingTimer;
 
@@ -197,6 +198,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _restart();
       return KeyEventResult.handled;
     }
+    if (_searchOpen) return KeyEventResult.ignored;
     final hw = HardwareKeyboard.instance;
     if (hw.isControlPressed &&
         hw.isShiftPressed &&
@@ -216,7 +218,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     if (hw.isControlPressed &&
         hw.isShiftPressed &&
         event.logicalKey == LogicalKeyboardKey.keyF) {
-      setState(() => _searchOpen = !_searchOpen);
+      setState(() {
+        _searchOpen = !_searchOpen;
+        if (!_searchOpen) _searchInvalid = false;
+      });
       if (!_searchOpen) _client?.searchClear();
       return KeyEventResult.handled;
     }
@@ -240,13 +245,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
   void _searchChanged(String pattern) {
     if (pattern.isEmpty) {
       _client?.searchClear();
+      setState(() => _searchInvalid = false);
     } else {
-      _client?.searchSet(pattern);
+      final ok = _client?.searchSet(pattern) ?? false;
+      setState(() => _searchInvalid = !ok);
     }
   }
 
   void _closeSearch() {
-    setState(() => _searchOpen = false);
+    setState(() {
+      _searchOpen = false;
+      _searchInvalid = false;
+    });
     _client?.searchClear();
   }
 
@@ -278,9 +288,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
   void _refreshSelection() {
     if (_client == null) return;
     // Selection changes FLAG_SELECTED on cells whose content didn't change, so
-    // partial damage misses them — re-render from a full snapshot.
-    _grid.apply(_client!.binding.fullSnapshot());
-    SchedulerBinding.instance.scheduleFrame();
+    // partial damage misses them — re-render from a full snapshot (searched when
+    // search is active so FLAG_MATCH* are preserved).
+    _client!.refreshView();
   }
 
   void _reportMouse(Offset local, int button, MouseAction action) {
@@ -532,6 +542,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       right: 0,
                       bottom: 0,
                       child: TerminalSearchBar(
+                        invalidPattern: _searchInvalid,
                         onChanged: _searchChanged,
                         onNext: () => _client?.searchNext(),
                         onPrev: () => _client?.searchPrev(),

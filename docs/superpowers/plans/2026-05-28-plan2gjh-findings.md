@@ -40,7 +40,7 @@ Defaults match alacritty; missing sections keep 2F per-field fallback.
 | `cargo test` (rust/) | **Pass** — 22 tests (4 search tests) |
 | `flutter build linux --debug` | **Pass** |
 | `flutter analyze lib/ test/ integration_test/` | **Pass** — no issues |
-| `flutter test` | **Pass** — 90 tests |
+| `flutter test` | **Pass** — 92 tests |
 
 ## Manual smoke (Linux)
 
@@ -49,6 +49,13 @@ Defaults match alacritty; missing sections keep 2F per-field fallback.
 | Search UI | **Not run in this session** | Automated: `Ctrl+Shift+F` widget test; regex/highlight/jump need interactive verify |
 | Box-drawing | **Not run** | Unit tests cover dash segments and arm weights |
 | Touch device | **Not run** | Widget tests: `tester.drag` scroll, `longPressAt` selection; fling decay constants untuned on hardware |
+
+## Post-review fixes
+
+- `_refreshSelection()` routes through `refreshView()` so search highlights survive selection updates.
+- Search bar shows invalid-regex indicator (`Icons.error_outline`, red hint) when `searchSet` returns false.
+- `_onKey` ignores terminal encoding while search bar is open.
+- Resize during active search uses `refreshView()` instead of plain `fullSnapshot()`.
 
 ## Deferred / risks
 
