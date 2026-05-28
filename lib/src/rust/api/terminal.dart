@@ -114,6 +114,14 @@ bool engineSearchPrev({required TerminalEngine engine}) =>
 void engineSearchClear({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineSearchClear(engine: engine);
 
+String? engineResolveHyperlink({
+  required TerminalEngine engine,
+  required int id,
+}) => RustLib.instance.api.crateApiTerminalEngineResolveHyperlink(
+  engine: engine,
+  id: id,
+);
+
 RenderUpdate engineFullSnapshotSearched({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineFullSnapshotSearched(
       engine: engine,

@@ -15,17 +15,23 @@ class CellData {
   final int fg;
   final int bg;
   final int flags;
+  final int hyperlinkId;
 
   const CellData({
     required this.codepoint,
     required this.fg,
     required this.bg,
     required this.flags,
+    required this.hyperlinkId,
   });
 
   @override
   int get hashCode =>
-      codepoint.hashCode ^ fg.hashCode ^ bg.hashCode ^ flags.hashCode;
+      codepoint.hashCode ^
+      fg.hashCode ^
+      bg.hashCode ^
+      flags.hashCode ^
+      hyperlinkId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -35,7 +41,8 @@ class CellData {
           codepoint == other.codepoint &&
           fg == other.fg &&
           bg == other.bg &&
-          flags == other.flags;
+          flags == other.flags &&
+          hyperlinkId == other.hyperlinkId;
 }
 
 /// Color configuration passed from Dart at engine creation.
