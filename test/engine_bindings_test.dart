@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/src/rust/api/terminal.dart';
+import 'package:flutter_alacritty/src/rust/engine.dart';
 import 'package:flutter_alacritty/src/rust/event_proxy.dart';
 import 'package:flutter_alacritty/src/rust/frb_generated.dart';
 
@@ -62,5 +63,41 @@ void main() {
     await engineAdvanceAndTakeDamage(engine: engine, bytes: '\x1b[6n'.codeUnits);
     final events = engineTakeEvents(engine: engine);
     expect(events.whereType<EngineEvent_PtyWrite>(), isNotEmpty);
+  });
+
+  test('search next/prev across the FFI boundary actually moves focus', () async {
+    // Mirrors the user's failing scenario: 3 matches on a single line, then
+    // verify next/prev cycle the focused match across the real dylib.
+    final engine = engineNew(
+        columns: 20, rows: 5, config: TerminalConfig.defaults().engineConfig);
+    await engineAdvanceAndTakeDamage(engine: engine, bytes: 'foofoofoo'.codeUnits);
+
+    expect(engineSearchSet(engine: engine, pattern: 'foo'), isTrue);
+    const flagCurrent = 1 << 10;
+    int focusedCol(RenderUpdate u) {
+      for (var c = 0; c < u.lines[0].cells.length; c++) {
+        if (u.lines[0].cells[c].flags & flagCurrent != 0) return c;
+      }
+      return -1;
+    }
+
+    var u = engineFullSnapshotSearched(engine: engine);
+    expect(focusedCol(u), 0, reason: 'set focuses first match');
+
+    expect(engineSearchNext(engine: engine), isTrue);
+    u = engineFullSnapshotSearched(engine: engine);
+    expect(focusedCol(u), 3, reason: 'next should reach col 3');
+
+    expect(engineSearchNext(engine: engine), isTrue);
+    u = engineFullSnapshotSearched(engine: engine);
+    expect(focusedCol(u), 6, reason: 'next should reach col 6');
+
+    expect(engineSearchPrev(engine: engine), isTrue);
+    u = engineFullSnapshotSearched(engine: engine);
+    expect(focusedCol(u), 3, reason: 'prev should move back to col 3');
+
+    expect(engineSearchPrev(engine: engine), isTrue);
+    u = engineFullSnapshotSearched(engine: engine);
+    expect(focusedCol(u), 0, reason: 'prev should move back to col 0');
   });
 }

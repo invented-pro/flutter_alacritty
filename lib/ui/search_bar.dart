@@ -24,7 +24,7 @@ class TerminalSearchBar extends StatefulWidget {
 }
 
 class _TerminalSearchBarState extends State<TerminalSearchBar> {
-  final FocusNode _node = FocusNode();
+  late final FocusNode _node = FocusNode(onKeyEvent: _onKey);
   final TextEditingController _ctrl = TextEditingController();
 
   @override
@@ -70,27 +70,28 @@ class _TerminalSearchBarState extends State<TerminalSearchBar> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Focus(
-              onKeyEvent: _onKey,
-              child: TextField(
-                controller: _ctrl,
-                focusNode: _node,
-                autofocus: true,
-                style: const TextStyle(color: Color(0xFFEDEDED), fontSize: 14),
-                cursorColor: const Color(0xFFEDEDED),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  hintText: widget.invalidPattern ? 'invalid regex' : 'search (regex)',
-                  hintStyle: TextStyle(
-                    color: widget.invalidPattern
-                        ? const Color(0xFFE06C75)
-                        : const Color(0xFF888888),
-                  ),
+            // Enter / Shift+Enter / Esc are handled by _node.onKeyEvent (set on
+            // the FocusNode itself), which fires BEFORE the TextField's text-
+            // input consumes the key — TextField was eating Shift+Enter as a
+            // newline-insertion attempt, so onPrev never fired. onSubmitted is
+            // gone too so Enter isn't double-handled.
+            child: TextField(
+              controller: _ctrl,
+              focusNode: _node,
+              autofocus: true,
+              style: const TextStyle(color: Color(0xFFEDEDED), fontSize: 14),
+              cursorColor: const Color(0xFFEDEDED),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: widget.invalidPattern ? 'invalid regex' : 'search (regex)',
+                hintStyle: TextStyle(
+                  color: widget.invalidPattern
+                      ? const Color(0xFFE06C75)
+                      : const Color(0xFF888888),
                 ),
-                onChanged: widget.onChanged,
-                onSubmitted: (_) => widget.onNext(),
               ),
+              onChanged: widget.onChanged,
             ),
           ),
           IconButton(

@@ -35,22 +35,20 @@ class TerminalEngineClient {
   bool _advancing = false;
   int? _pendingColumns;
   int? _pendingRows;
-  bool _searchActive = false;
-
-  /// Re-applies the current viewport (searched snapshot while search is active),
-  /// used by selection refresh and search navigation. Search highlight changes
-  /// FLAG_MATCH on cells whose content didn't change, so a full snapshot is needed.
+  /// Re-applies the current viewport. Always uses the searched snapshot — the
+  /// Rust side short-circuits to a plain snapshot when no search is active, so
+  /// this is the same cost when idle and removes a class of Dart-side flag-
+  /// desync bugs (e.g. a stale _searchActive after engine restart leaving
+  /// match highlights stuck or absent).
   void refreshView() {
-    _grid.apply(
-      _searchActive ? _binding.fullSnapshotSearched() : _binding.fullSnapshot(),
-    );
+    _grid.apply(_binding.fullSnapshotSearched());
     SchedulerBinding.instance.scheduleFrame();
   }
 
   bool searchSet(String pattern) {
-    _searchActive = _binding.searchSet(pattern);
+    final ok = _binding.searchSet(pattern);
     refreshView();
-    return _searchActive;
+    return ok;
   }
 
   bool searchNext() {
@@ -67,7 +65,6 @@ class TerminalEngineClient {
 
   void searchClear() {
     _binding.searchClear();
-    _searchActive = false;
     refreshView();
   }
 

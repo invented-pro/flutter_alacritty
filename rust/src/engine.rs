@@ -812,6 +812,44 @@ mod tests {
     }
 
     #[test]
+    fn search_next_and_prev_cycle_multiple_matches_on_one_line() {
+        // Three "foo" on a single line at cols 0-2, 3-5, 6-8 — the user's
+        // failing scenario ("同行多匹配 ↓ 不动").
+        let mut e = engine(20, 5);
+        e.advance(b"foofoofoo".to_vec());
+        assert!(e.search_set("foo".to_string()));
+        // After set: focus on first.
+        let u = e.full_snapshot_searched();
+        assert_ne!(u.lines[0].cells[0].flags & FLAG_MATCH_CURRENT, 0);
+        assert_eq!(u.lines[0].cells[3].flags & FLAG_MATCH_CURRENT, 0);
+
+        // next → second.
+        assert!(e.search_next());
+        let u = e.full_snapshot_searched();
+        assert_eq!(u.lines[0].cells[0].flags & FLAG_MATCH_CURRENT, 0);
+        assert_ne!(u.lines[0].cells[3].flags & FLAG_MATCH_CURRENT, 0);
+        assert_eq!(u.lines[0].cells[6].flags & FLAG_MATCH_CURRENT, 0);
+
+        // next → third.
+        assert!(e.search_next());
+        let u = e.full_snapshot_searched();
+        assert_eq!(u.lines[0].cells[3].flags & FLAG_MATCH_CURRENT, 0);
+        assert_ne!(u.lines[0].cells[6].flags & FLAG_MATCH_CURRENT, 0);
+
+        // prev → second.
+        assert!(e.search_prev());
+        let u = e.full_snapshot_searched();
+        assert_ne!(u.lines[0].cells[3].flags & FLAG_MATCH_CURRENT, 0);
+        assert_eq!(u.lines[0].cells[6].flags & FLAG_MATCH_CURRENT, 0);
+
+        // prev → first.
+        assert!(e.search_prev());
+        let u = e.full_snapshot_searched();
+        assert_ne!(u.lines[0].cells[0].flags & FLAG_MATCH_CURRENT, 0);
+        assert_eq!(u.lines[0].cells[3].flags & FLAG_MATCH_CURRENT, 0);
+    }
+
+    #[test]
     fn invalid_regex_returns_false_and_highlights_nothing() {
         let mut e = engine(20, 5);
         e.advance(b"foo".to_vec());
