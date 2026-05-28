@@ -447,6 +447,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
                 _client?.scrollLines(
                     up ? _config.scrolling.multiplier : -_config.scrolling.multiplier);
               },
+              // Precision trackpad two-finger pan (PointerDeviceKind.trackpad):
+              // Flutter delivers these as PanZoom events, not PointerScroll, so
+              // onPointerSignal misses them. Reuse the touch scroll accumulator
+              // (alt-screen → arrows, app-mouse → mouse scroll, else scrollLines).
+              onPointerPanZoomStart: (_) {
+                _stopFling();
+                _touchScrollAccum = 0;
+              },
+              onPointerPanZoomUpdate: (e) => _touchScrollBy(e.localPanDelta.dy),
               child: GestureDetector(
                 supportedDevices: const {PointerDeviceKind.touch},
                 behavior: HitTestBehavior.translucent,
