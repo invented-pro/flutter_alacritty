@@ -1,5 +1,5 @@
 display_name: Flutter Alacritty
-package_name: flutter_alacritty
+package_name: flutter-alacritty
 installed_size: 100000
 description: Alacritty-based terminal emulator for Flutter
 maintainer:
