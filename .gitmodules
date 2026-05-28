@@ -1,0 +1,3 @@
+[submodule "packages/rust_lib_flutter_alacritty"]
+	path = packages/rust_lib_flutter_alacritty
+	url = https://github.com/hhoao/rust_lib_flutter_alacritty.git

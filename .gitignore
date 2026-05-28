@@ -1,7 +1,7 @@
 # Git worktrees (local isolated workspaces)
 .worktrees/
 
-# Local symlink to ../../../opensource path deps (see rust/Cargo.toml)
+# Local symlink to ../../../opensource path deps (see packages/rust_lib_flutter_alacritty/rust/Cargo.toml)
 opensource/
 
 # Miscellaneous

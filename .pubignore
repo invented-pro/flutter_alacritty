@@ -1,0 +1,24 @@
+# App runners (not part of the published library package).
+/android/
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
+/integration_test/
+/test_driver/
+/lib/main.dart
+
+# Internal docs and dev plans.
+/docs/
+
+# Rust plugin is published separately (git submodule).
+# NOTE: Comment out when running `dart pub publish` inside the submodule.
+# See PUBLISHING.md.
+/packages/rust_lib_flutter_alacritty/
+
+# Native / tool artifacts (pub also respects .gitignore; list explicitly).
+/build/
+**/.dart_tool/
+**/target/
+**/build/

@@ -12,11 +12,13 @@ import 'package:flutter_alacritty/src/rust/frb_generated.dart';
 const _libName = 'librust_lib_flutter_alacritty.so';
 
 /// Locations a built Rust cdylib may live, fastest/most-likely first.
+const _rustDir = 'packages/rust_lib_flutter_alacritty/rust';
+
 const _candidates = [
   'build/linux/x64/release/bundle/lib/$_libName',
   'build/linux/x64/debug/bundle/lib/$_libName',
-  'rust/target/release/$_libName',
-  'rust/target/debug/$_libName',
+  '$_rustDir/target/release/$_libName',
+  '$_rustDir/target/debug/$_libName',
 ];
 
 /// Returns the path to a usable Rust lib, building it if none is present.
@@ -27,12 +29,13 @@ Future<String> _findOrBuildLib() async {
     if (File(p).existsSync()) return p;
   }
   // No artifact yet: build it so this test actually runs.
-  final result = await Process.run('cargo', ['build'], workingDirectory: 'rust');
+  final result =
+      await Process.run('cargo', ['build'], workingDirectory: _rustDir);
   if (result.exitCode != 0) {
     fail('Failed to build the Rust lib for the FFI test '
-        '(`cargo build` in rust/ exited ${result.exitCode}):\n${result.stderr}');
+        '(`cargo build` in $_rustDir/ exited ${result.exitCode}):\n${result.stderr}');
   }
-  const built = 'rust/target/debug/$_libName';
+  final built = '$_rustDir/target/debug/$_libName';
   if (!File(built).existsSync()) {
     fail('cargo build succeeded but $built was not produced.');
   }

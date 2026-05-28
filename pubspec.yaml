@@ -1,19 +1,21 @@
 name: flutter_alacritty
-description: "A Flutter project for Alacritty."
-publish_to: 'none'
-
-version: 1.0.0+1
+description: >-
+  Flutter terminal widget powered by an Alacritty-based Rust engine
+  (flutter_rust_bridge + flutter_pty).
+version: 1.0.0
+repository: https://github.com/hhoao/flutter_alacritty
+issue_tracker: https://github.com/hhoao/flutter_alacritty/issues
+homepage: https://github.com/hhoao/flutter_alacritty
 
 environment:
   sdk: ^3.11.5
+  flutter: ">=3.3.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
-  flutter_rust_bridge: 2.12.0
-  rust_lib_flutter_alacritty:
-    path: rust_builder
+  flutter_rust_bridge: ^2.12.0
+  rust_lib_flutter_alacritty: ^0.1.0
   flutter_pty: ^0.4.0
   freezed_annotation: ^3.0.0
   toml: ^0.18.0
@@ -26,6 +28,12 @@ dev_dependencies:
     sdk: flutter
   freezed: ^3.0.0
   build_runner: ^2.4.0
+
+# Path override for the git submodule (see .gitmodules).
+# Remove after rust_lib_flutter_alacritty is published on pub.dev.
+dependency_overrides:
+  rust_lib_flutter_alacritty:
+    path: packages/rust_lib_flutter_alacritty
 
 flutter:
   uses-material-design: true
