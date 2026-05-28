@@ -75,7 +75,8 @@ void main() {
               matchFg: 0x181818,
               focusedBg: 0xF4BF75,
               focusedFg: 0x181818,
-            )),
+            ),
+            hintColors: const HintColors(bg: 0xF4BF75, fg: 0x181818)),
       ),
     ));
     await tester.pump();
@@ -102,6 +103,26 @@ void main() {
     ));
     expect(isSelected(grid.flagsAt(0, 0)), isTrue);
     expect(isSelected(grid.flagsAt(0, 1)), isFalse);
+  });
+
+  group('applySearchOverride precedence with hyperlink', () {
+    const search = SearchColors(
+      matchBg: 0xAC4242, matchFg: 0x181818, focusedBg: 0xF4BF75, focusedFg: 0x181818);
+    const hint = HintColors(bg: 0xF4BF75, fg: 0x181818);
+    const base = (fg: 0xD8D8D8, bg: 0x222222);
+    test('FLAG_HYPERLINK alone uses hint colors', () {
+      final r = applyMatchOrHint(kFlagHyperlink, base, search, hint);
+      expect(r.bg, 0xF4BF75);
+    });
+    test('FLAG_MATCH wins over FLAG_HYPERLINK', () {
+      final r = applyMatchOrHint(kFlagMatch | kFlagHyperlink, base, search, hint);
+      expect(r.bg, 0xAC4242);
+    });
+    test('FLAG_MATCH_CURRENT wins over both', () {
+      final r = applyMatchOrHint(
+          kFlagMatchCurrent | kFlagMatch | kFlagHyperlink, base, search, hint);
+      expect(r.bg, 0xF4BF75); // focused matches background
+    });
   });
 
   group('applySearchOverride', () {

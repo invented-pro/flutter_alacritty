@@ -18,6 +18,7 @@ class _CountingTerminalPainter extends TerminalPainter {
     required super.blinkOn,
     required super.selectionColor,
     required super.searchColors,
+    required super.hintColors,
   });
 
   @override
@@ -59,6 +60,7 @@ void main() {
               focusedBg: 0xF4BF75,
               focusedFg: 0x181818,
             ),
+            hintColors: const HintColors(bg: 0xF4BF75, fg: 0x181818),
           ),
         ),
       ),

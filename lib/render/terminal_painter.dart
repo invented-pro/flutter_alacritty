@@ -51,6 +51,28 @@ Rect cursorRect(int shape, double cellWidth, double cellHeight, double lineWidth
   return ec;
 }
 
+/// Background/foreground for hint-highlighted (hyperlink) cells.
+class HintColors {
+  const HintColors({required this.bg, required this.fg});
+  final int bg;
+  final int fg;
+}
+
+/// Effective fg/bg with full precedence: focused-match > match > hyperlink > base.
+({int fg, int bg}) applyMatchOrHint(
+    int flags, ({int fg, int bg}) ec, SearchColors search, HintColors hint) {
+  if (flags & kFlagMatchCurrent != 0) {
+    return (fg: search.focusedFg, bg: search.focusedBg);
+  }
+  if (flags & kFlagMatch != 0) {
+    return (fg: search.matchFg, bg: search.matchBg);
+  }
+  if (flags & kFlagHyperlink != 0) {
+    return (fg: hint.fg, bg: hint.bg);
+  }
+  return ec;
+}
+
 class SearchColors {
   const SearchColors({
     required this.matchBg,
@@ -73,6 +95,7 @@ class TerminalPainter extends CustomPainter {
     required this.blinkOn,
     required this.selectionColor,
     required this.searchColors,
+    required this.hintColors,
   })  : _paintGeneration = grid.generation,
         super(repaint: Listenable.merge([grid, blinkOn]));
 
@@ -83,10 +106,8 @@ class TerminalPainter extends CustomPainter {
   final ValueListenable<bool> blinkOn;
   final int selectionColor;
   final SearchColors searchColors;
+  final HintColors hintColors;
   final int _paintGeneration;
-
-  ({int fg, int bg}) _withSearch(int flags, ({int fg, int bg}) ec) =>
-      applySearchOverride(flags, ec, searchColors);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -100,13 +121,15 @@ class TerminalPainter extends CustomPainter {
       final y = row * cellHeight;
       for (var col = 0; col < cols; col++) {
         final flags = grid.flagsAt(row, col);
-        final ec = _withSearch(
+        final ec = applyMatchOrHint(
           flags,
           effectiveColors(
             flags,
             grid.fgAt(row, col),
             grid.bgAt(row, col),
           ),
+          searchColors,
+          hintColors,
         );
         bgPaint.color = Color(0xFF000000 | ec.bg);
         canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
@@ -129,9 +152,11 @@ class TerminalPainter extends CustomPainter {
         if (flags & kFlagWideSpacer != 0) continue; // covered by the wide glyph at col-1
         final cp = grid.codepointAt(row, col);
         if (cp == 32 || cp == 0) continue;
-        final ec = _withSearch(
+        final ec = applyMatchOrHint(
           flags,
           effectiveColors(flags, grid.fgAt(row, col), grid.bgAt(row, col)),
+          searchColors,
+          hintColors,
         );
         final fg = Color(0xFF000000 | ec.fg);
         final cellRect = Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight);
@@ -151,13 +176,13 @@ class TerminalPainter extends CustomPainter {
             needsWarmupFrame = true;
           }
         }
-        if (flags & (kFlagUnderline | kFlagStrikeout) != 0) {
+        if (flags & (kFlagUnderline | kFlagStrikeout | kFlagHyperlink) != 0) {
           final x = col * cellWidth;
           final decoPaint = Paint()
             ..color = fg
             ..strokeWidth = lineWidth;
           final ys = decorationYs(y, cellHeight);
-          if (flags & kFlagUnderline != 0) {
+          if (flags & (kFlagUnderline | kFlagHyperlink) != 0) {
             canvas.drawLine(
               Offset(x, ys.underline),
               Offset(x + cellWidth, ys.underline),

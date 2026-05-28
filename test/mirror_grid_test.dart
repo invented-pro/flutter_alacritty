@@ -125,6 +125,25 @@ void main() {
     expect(g.codepointAt(0, 9), 65);
   });
 
+  test('hyperlinkId lane round-trips through apply', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true, rows: 1, columns: 3,
+      lines: [LineCells(
+        line: 0,
+        codepoints: Int32List.fromList([0x41, 0x42, 0x43]),
+        fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8, 0xD8D8D8]),
+        bg: Int32List.fromList([0x181818, 0x181818, 0x181818]),
+        flags: Uint16List.fromList([0, kFlagHyperlink, kFlagHyperlink]),
+        hyperlinkId: Int32List.fromList([0, 7, 7]),
+      )],
+      cursorRow: 0, cursorCol: 0, cursorVisible: false,
+    ));
+    expect(g.hyperlinkIdAt(0, 0), 0);
+    expect(g.hyperlinkIdAt(0, 1), 7);
+    expect(g.hyperlinkIdAt(0, 2), 7);
+  });
+
   test('partial update does not shrink viewport from inferred rows', () {
     final g = MirrorGrid();
     g.initializeEmpty(24, 80);

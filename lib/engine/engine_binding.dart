@@ -162,13 +162,22 @@ class FrbEngineBinding implements EngineBinding {
     final fg = Int32List(n);
     final bg = Int32List(n);
     final flags = Uint16List(n);
+    final hyperlinkId = Int32List(n);
     for (var i = 0; i < n; i++) {
       final c = l.cells[i];
       codepoints[i] = c.codepoint;
       fg[i] = c.fg;
       bg[i] = c.bg;
       flags[i] = c.flags;
+      hyperlinkId[i] = c.hyperlinkId;
     }
-    return LineCells(line: l.line, codepoints: codepoints, fg: fg, bg: bg, flags: flags);
+    return LineCells(
+      line: l.line,
+      codepoints: codepoints,
+      fg: fg,
+      bg: bg,
+      flags: flags,
+      hyperlinkId: hyperlinkId,
+    );
   }
 }

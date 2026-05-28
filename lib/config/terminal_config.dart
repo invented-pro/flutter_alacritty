@@ -31,6 +31,8 @@ class TerminalColors {
     required this.searchMatchFg,
     required this.searchFocusedBg,
     required this.searchFocusedFg,
+    required this.hintStartFg,
+    required this.hintStartBg,
   });
 
   final int background;
@@ -41,6 +43,8 @@ class TerminalColors {
   final int searchMatchFg;
   final int searchFocusedBg;
   final int searchFocusedFg;
+  final int hintStartFg;
+  final int hintStartBg;
 
   TerminalColors copyWith({
     int? background,
@@ -51,6 +55,8 @@ class TerminalColors {
     int? searchMatchFg,
     int? searchFocusedBg,
     int? searchFocusedFg,
+    int? hintStartFg,
+    int? hintStartBg,
   }) =>
       TerminalColors(
         background: background ?? this.background,
@@ -61,6 +67,8 @@ class TerminalColors {
         searchMatchFg: searchMatchFg ?? this.searchMatchFg,
         searchFocusedBg: searchFocusedBg ?? this.searchFocusedBg,
         searchFocusedFg: searchFocusedFg ?? this.searchFocusedFg,
+        hintStartFg: hintStartFg ?? this.hintStartFg,
+        hintStartBg: hintStartBg ?? this.hintStartBg,
       );
 }
 
@@ -145,6 +153,8 @@ class TerminalConfig {
           searchMatchFg: 0x181818,
           searchFocusedBg: 0xF4BF75,
           searchFocusedFg: 0x181818,
+          hintStartFg: 0x181818,
+          hintStartBg: 0xF4BF75,
         ),
         font: FontConfig(
           family: 'DejaVu Sans Mono',
@@ -223,6 +233,8 @@ class TerminalConfig {
     final bright = section(colorsM, 'bright');
     final selectionM = section(colorsM, 'selection');
     final searchM = section(colorsM, 'search');
+    final hintsM = section(colorsM, 'hints');
+    final hintStartM = section(hintsM, 'start');
     final matchesM = section(searchM, 'matches');
     final focusedM = section(searchM, 'focused_match');
 
@@ -271,6 +283,8 @@ class TerminalConfig {
         searchMatchFg: color(matchesM, 'foreground', d.colors.searchMatchFg),
         searchFocusedBg: color(focusedM, 'background', d.colors.searchFocusedBg),
         searchFocusedFg: color(focusedM, 'foreground', d.colors.searchFocusedFg),
+        hintStartFg: color(hintStartM, 'foreground', d.colors.hintStartFg),
+        hintStartBg: color(hintStartM, 'background', d.colors.hintStartBg),
       ),
       font: FontConfig(
         family: str(fontM, 'family', d.font.family),

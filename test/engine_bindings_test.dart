@@ -133,4 +133,23 @@ void main() {
     u = engineFullSnapshotSearched(engine: engine);
     expect(focusedCol(u), 0, reason: 'prev should move back to col 0');
   });
+
+  test('OSC 8 hyperlink carries hyperlinkId on CellData', () async {
+    final engine = engineNew(
+      columns: 40,
+      rows: 3,
+      config: TerminalConfig.defaults().engineConfig,
+    );
+    // OSC 8: ESC ] 8 ; id ; uri ESC \ TEXT ESC ] 8 ; ; ESC \
+    const osc8 = '\x1b]8;;https://example.com\x1b\\X\x1b]8;;\x1b\\';
+    final u = await engineAdvanceAndTakeDamage(
+      engine: engine,
+      bytes: osc8.codeUnits,
+    );
+    final u2 = engineFullSnapshotSearched(engine: engine);
+    final snap = u2.lines.isNotEmpty ? u2 : u;
+    final cell = snap.lines.firstWhere((l) => l.line == 0).cells[0];
+    expect(cell.hyperlinkId, isNonZero);
+    expect(cell.flags & (1 << 11), isNonZero);
+  });
 }

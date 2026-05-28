@@ -50,6 +50,23 @@ void main() {
     expect(c.searchFocusedFg, 0x181818);
   });
 
+  test('hint start colors default to alacritty values', () {
+    final c = TerminalConfig.defaults().colors;
+    expect(c.hintStartBg, 0xF4BF75);
+    expect(c.hintStartFg, 0x181818);
+  });
+
+  test('fromTomlString reads [colors.hints.start]', () {
+    const toml = '''
+[colors.hints.start]
+background = "#abcdef"
+foreground = "#012345"
+''';
+    final c = TerminalConfig.fromTomlString(toml).colors;
+    expect(c.hintStartBg, 0xABCDEF);
+    expect(c.hintStartFg, 0x012345);
+  });
+
   test('fromTomlString reads search colors', () {
     const toml = '''
 [colors.search.matches]

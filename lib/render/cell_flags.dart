@@ -10,7 +10,9 @@ const int kFlagStrikeout = 1 << 7;
 const int kFlagSelected = 1 << 8;
 const int kFlagMatch = 1 << 9;
 const int kFlagMatchCurrent = 1 << 10;
+const int kFlagHyperlink = 1 << 11;
 
 bool isSelected(int flags) => flags & kFlagSelected != 0;
 bool isMatch(int flags) => flags & kFlagMatch != 0;
 bool isCurrentMatch(int flags) => flags & kFlagMatchCurrent != 0;
+bool isHyperlink(int flags) => flags & kFlagHyperlink != 0;

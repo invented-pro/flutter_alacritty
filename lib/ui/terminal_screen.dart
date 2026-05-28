@@ -525,6 +525,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
                         focusedBg: _config.colors.searchFocusedBg,
                         focusedFg: _config.colors.searchFocusedFg,
                       ),
+                      hintColors: HintColors(
+                        bg: _config.colors.hintStartBg,
+                        fg: _config.colors.hintStartFg,
+                      ),
                     ),
                   ),
                   if (_status != TermStatus.running)
