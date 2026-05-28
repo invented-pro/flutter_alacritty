@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show utf8;
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
@@ -10,6 +11,7 @@ import '../config/terminal_config.dart';
 import '../engine/engine_binding.dart';
 import '../src/rust/engine.dart' show EngineConfig;
 import '../engine/terminal_engine_client.dart';
+import '../input/ime_session.dart';
 import '../input/key_input.dart';
 import '../input/mouse_input.dart';
 import '../input/paste.dart';
@@ -21,6 +23,7 @@ import '../render/cell_metrics.dart';
 import '../render/glyph_cache.dart';
 import '../render/mirror_grid.dart';
 import '../render/terminal_painter.dart';
+import 'preedit_overlay.dart';
 import 'search_bar.dart';
 
 String _shellQuote(String s) {
@@ -116,6 +119,14 @@ class _TerminalScreenState extends State<TerminalScreen>
   final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
   Timer? _blinkTimer;
   final FocusNode _focus = FocusNode();
+  String? _preedit;
+  late final ImeSession _ime = ImeSession(
+    onCommit: _writeCommittedText,
+    onPreeditChanged: _onPreeditChanged,
+  );
+
+  @visibleForTesting
+  ImeSession get imeForTest => _ime;
 
   @override
   void initState() {
@@ -195,6 +206,7 @@ class _TerminalScreenState extends State<TerminalScreen>
       );
       pty.exitCode.then((code) => _exitIfCurrent(pty, code));
       _focus.addListener(_reportFocus);
+      _focus.addListener(_handleImeFocusChange);
       _status = TermStatus.running;
       _exitCode = null;
       _errorMessage = null;
@@ -217,6 +229,8 @@ class _TerminalScreenState extends State<TerminalScreen>
   void _restart() {
     _outputSub?.cancel();
     _focus.removeListener(_reportFocus);
+    _focus.removeListener(_handleImeFocusChange);
+    _ime.detach();
     _pty?.kill();
     _client?.dispose();
     _outputSub = null;
@@ -315,6 +329,14 @@ class _TerminalScreenState extends State<TerminalScreen>
         Clipboard.setData(ClipboardData(text: text));
       }
       return KeyEventResult.handled;
+    }
+    if (_ime.isAttached &&
+        event.character != null &&
+        event.character!.isNotEmpty &&
+        !hw.isControlPressed &&
+        !hw.isAltPressed &&
+        !hw.isMetaPressed) {
+      return KeyEventResult.ignored;
     }
     final bytes = encodeKey(
       event.logicalKey,
@@ -437,6 +459,39 @@ class _TerminalScreenState extends State<TerminalScreen>
         _focus.hasFocus ? [0x1b, 0x5b, 0x49] : [0x1b, 0x5b, 0x4f])); // ESC[I / ESC[O
   }
 
+  void _handleImeFocusChange() {
+    if (_focus.hasFocus) {
+      _ime.attach();
+    } else {
+      _ime.detach();
+    }
+  }
+
+  void _onPreeditChanged(String? p) {
+    if (!mounted) return;
+    if (p == _preedit) return;
+    setState(() => _preedit = p);
+  }
+
+  void _writeCommittedText(String t) {
+    if (t.isEmpty) return;
+    _pty?.write(Uint8List.fromList(utf8.encode(t)));
+  }
+
+  void _reportCaretRectToIme() {
+    if (!_ime.isAttached) return;
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.attached) return;
+    final localRect = Rect.fromLTWH(
+      _grid.cursorCol * _metrics.width,
+      _grid.cursorRow * _metrics.height,
+      _metrics.width,
+      _metrics.height,
+    );
+    final origin = renderBox.localToGlobal(localRect.topLeft);
+    _ime.setCaretRect(origin & localRect.size);
+  }
+
   (int, int, bool) _cellAt(Offset local) {
     final col = (local.dx / _metrics.width).floor().clamp(0, _cols - 1);
     final row = (local.dy / _metrics.height).floor().clamp(0, _rows - 1);
@@ -517,6 +572,8 @@ class _TerminalScreenState extends State<TerminalScreen>
     _client?.dispose();
     _grid.dispose();
     _focus.removeListener(_reportFocus);
+    _focus.removeListener(_handleImeFocusChange);
+    _ime.detach();
     _focus.dispose();
     _bellCtrl.dispose();
     super.dispose();
@@ -531,6 +588,8 @@ class _TerminalScreenState extends State<TerminalScreen>
           final cols = (constraints.maxWidth / _metrics.width).floor().clamp(1, 1000);
           final rows = (constraints.maxHeight / _metrics.height).floor().clamp(1, 1000);
           WidgetsBinding.instance.addPostFrameCallback((_) => _ensureStarted(cols, rows));
+          WidgetsBinding.instance
+              .addPostFrameCallback((_) => _reportCaretRectToIme());
           return Focus(
             focusNode: _focus,
             autofocus: true,
@@ -768,6 +827,19 @@ class _TerminalScreenState extends State<TerminalScreen>
                       child: ColoredBox(
                           color: Color(0xFF000000 | _config.bell.color)),
                     ),
+                  ),
+                  PreeditOverlay(
+                    text: _preedit,
+                    cursorRect: Rect.fromLTWH(
+                      _grid.cursorCol * _metrics.width,
+                      _grid.cursorRow * _metrics.height,
+                      _metrics.width,
+                      _metrics.height,
+                    ),
+                    bg: _config.ime.preeditBg,
+                    fg: _config.ime.preeditFg,
+                    underline: _config.ime.underline,
+                    textStyle: _style,
                   ),
                 ],
               ),
