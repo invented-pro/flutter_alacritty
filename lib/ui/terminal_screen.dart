@@ -88,10 +88,16 @@ class TerminalScreen extends StatefulWidget {
   State<TerminalScreen> createState() => _TerminalScreenState();
 }
 
-class _TerminalScreenState extends State<TerminalScreen> {
+class _TerminalScreenState extends State<TerminalScreen>
+    with SingleTickerProviderStateMixin {
   late final UrlLauncher _launch = widget.launchUrl ??
       (u) async => launcher.launchUrl(Uri.parse(u));
   late final TerminalConfig _config = widget.config ?? TerminalConfig.defaults();
+  late final AnimationController _bellCtrl = AnimationController(
+    vsync: this,
+    duration: Duration(
+        milliseconds: _config.bell.duration > 0 ? _config.bell.duration : 1),
+  );
   late double _fontSize = _config.font.size;
   late TextStyle _style = _config.textStyle.copyWith(fontSize: _fontSize);
   late CellMetrics _metrics = CellMetrics.measure(_style);
@@ -221,9 +227,19 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _start(_cols, _rows);
   }
 
+  @visibleForTesting
+  void flashBellForTest() => _flashBell();
+
+  @visibleForTesting
+  AnimationController get bellControllerForTest => _bellCtrl;
+
   void _flashBell() {
-    // Audible bell; a visual flash is sub-project C.
     SystemSound.play(SystemSoundType.alert);
+    if (_config.bell.duration > 0) {
+      _bellCtrl.value = 1.0;
+      _bellCtrl.animateTo(0.0,
+          duration: Duration(milliseconds: _config.bell.duration));
+    }
   }
 
   void _setZoom(double next) {
@@ -502,6 +518,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _grid.dispose();
     _focus.removeListener(_reportFocus);
     _focus.dispose();
+    _bellCtrl.dispose();
     super.dispose();
   }
 
@@ -743,6 +760,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
                         onPrev: () => _client?.searchPrev(),
                         onClose: _closeSearch,
                       ),
+                    ),
+                  ),
+                  IgnorePointer(
+                    child: FadeTransition(
+                      opacity: _bellCtrl,
+                      child: ColoredBox(
+                          color: Color(0xFF000000 | _config.bell.color)),
                     ),
                   ),
                 ],

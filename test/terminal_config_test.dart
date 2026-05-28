@@ -56,6 +56,26 @@ void main() {
     expect(c.hintStartFg, 0x181818);
   });
 
+  test('bell defaults match alacritty', () {
+    final b = TerminalConfig.defaults().bell;
+    expect(b.color, 0xFFFFFF);
+    expect(b.duration, 0);
+    expect(b.animation, 'linear');
+  });
+
+  test('fromTomlString reads [bell]', () {
+    const toml = '''
+[bell]
+color = "#ff0000"
+duration = 250
+animation = "EaseOutExpo"
+''';
+    final b = TerminalConfig.fromTomlString(toml).bell;
+    expect(b.color, 0xFF0000);
+    expect(b.duration, 250);
+    expect(b.animation, 'EaseOutExpo');
+  });
+
   test('fromTomlString reads [colors.hints.start]', () {
     const toml = '''
 [colors.hints.start]

@@ -121,6 +121,23 @@ class MouseConfig {
       MouseConfig(doubleClickThreshold: doubleClickThreshold ?? this.doubleClickThreshold);
 }
 
+class BellConfig {
+  const BellConfig({
+    required this.color,
+    required this.duration,
+    required this.animation,
+  });
+  final int color;
+  final int duration; // ms; 0 = disabled
+  final String animation; // accepted for forward-compat; only "linear" rendered
+
+  BellConfig copyWith({int? color, int? duration, String? animation}) => BellConfig(
+        color: color ?? this.color,
+        duration: duration ?? this.duration,
+        animation: animation ?? this.animation,
+      );
+}
+
 /// Immutable, programmatic terminal configuration. Build with [TerminalConfig.defaults]
 /// + [copyWith], or parse from TOML via [fromTomlString]. No file IO here — that lives
 /// in ConfigLoader, so a library host can use this directly with no file.
@@ -131,6 +148,7 @@ class TerminalConfig {
     required this.cursor,
     required this.scrolling,
     required this.mouse,
+    required this.bell,
   });
 
   final TerminalColors colors;
@@ -138,6 +156,7 @@ class TerminalConfig {
   final CursorConfig cursor;
   final ScrollConfig scrolling;
   final MouseConfig mouse;
+  final BellConfig bell;
 
   /// The v1 look-and-feel, verbatim.
   factory TerminalConfig.defaults() => const TerminalConfig(
@@ -165,6 +184,7 @@ class TerminalConfig {
         cursor: CursorConfig(blinkInterval: 530),
         scrolling: ScrollConfig(history: 10000, multiplier: 3),
         mouse: MouseConfig(doubleClickThreshold: 300),
+        bell: BellConfig(color: 0xFFFFFF, duration: 0, animation: 'linear'),
       );
 
   TerminalConfig copyWith({
@@ -173,6 +193,7 @@ class TerminalConfig {
     CursorConfig? cursor,
     ScrollConfig? scrolling,
     MouseConfig? mouse,
+    BellConfig? bell,
   }) =>
       TerminalConfig(
         colors: colors ?? this.colors,
@@ -180,6 +201,7 @@ class TerminalConfig {
         cursor: cursor ?? this.cursor,
         scrolling: scrolling ?? this.scrolling,
         mouse: mouse ?? this.mouse,
+        bell: bell ?? this.bell,
       );
 
   /// TextStyle the renderer measures cells from and feeds the glyph cache.
@@ -272,6 +294,7 @@ class TerminalConfig {
     final cursorM = section(map, 'cursor');
     final scrollM = section(map, 'scrolling');
     final mouseM = section(map, 'mouse');
+    final bellM = section(map, 'bell');
 
     return TerminalConfig(
       colors: TerminalColors(
@@ -302,6 +325,11 @@ class TerminalConfig {
       mouse: MouseConfig(
         doubleClickThreshold:
             integer(mouseM, 'double_click_threshold', d.mouse.doubleClickThreshold),
+      ),
+      bell: BellConfig(
+        color: color(bellM, 'color', d.bell.color),
+        duration: integer(bellM, 'duration', d.bell.duration),
+        animation: str(bellM, 'animation', d.bell.animation),
       ),
     );
   }

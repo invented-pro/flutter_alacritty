@@ -469,6 +469,42 @@ void main() {
     title.dispose();
   });
 
+  testWidgets('_flashBell with duration > 0 starts the bell animation',
+      (tester) async {
+    final title = ValueNotifier<String>('t');
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalScreen(
+        title: title,
+        config: TerminalConfig.defaults().copyWith(
+          bell: const BellConfig(
+            color: 0xFFFFFF,
+            duration: 100,
+            animation: 'linear',
+          ),
+        ),
+        ptyFactory: ({required rows, required columns}) => _FakePty(),
+        engineFactory: ({
+          required columns,
+          required rows,
+          required onPtyWrite,
+          required onTitle,
+          required onBell,
+          required onClipboard,
+          required engineConfig,
+        }) => _FakeBinding(),
+      ),
+    ));
+    await tester.pump();
+    final state = tester.state(find.byType(TerminalScreen));
+    (state as dynamic).flashBellForTest();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+    final ctrl = (state as dynamic).bellControllerForTest as AnimationController;
+    expect(ctrl.value, lessThan(1.0));
+    expect(ctrl.value, greaterThan(0.0));
+    title.dispose();
+  });
+
   testWidgets('Shift+right-click bypasses the menu (forwards to program)',
       (tester) async {
     final title = ValueNotifier<String>('t');
