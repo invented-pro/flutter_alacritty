@@ -9,23 +9,53 @@ import 'package:flutter_alacritty/src/rust/engine.dart';
 import 'package:flutter_alacritty/src/rust/event_proxy.dart';
 import 'package:flutter_alacritty/src/rust/frb_generated.dart';
 
-const _libName = 'librust_lib_flutter_alacritty.so';
+/// Rust cdylib filename for the current OS (see cargokit `getArtifactNames`).
+String _rustLibFileName() {
+  if (Platform.isWindows) return 'rust_lib_flutter_alacritty.dll';
+  if (Platform.isMacOS) return 'librust_lib_flutter_alacritty.dylib';
+  return 'librust_lib_flutter_alacritty.so';
+}
 
 /// Locations a built Rust cdylib may live, fastest/most-likely first.
 const _rustDir = 'packages/rust_lib_flutter_alacritty/rust';
 
-const _candidates = [
-  'build/linux/x64/release/bundle/lib/$_libName',
-  'build/linux/x64/debug/bundle/lib/$_libName',
-  '$_rustDir/target/release/$_libName',
-  '$_rustDir/target/debug/$_libName',
-];
+List<String> _libCandidates() {
+  final name = _rustLibFileName();
+  final cargoDebug = '$_rustDir/target/debug/$name';
+  final cargoRelease = '$_rustDir/target/release/$name';
+
+  if (Platform.isLinux) {
+    return [
+      'build/linux/x64/release/bundle/lib/$name',
+      'build/linux/x64/debug/bundle/lib/$name',
+      cargoRelease,
+      cargoDebug,
+    ];
+  }
+  if (Platform.isMacOS) {
+    return [
+      'build/macos/Build/Products/Release/$name',
+      'build/macos/Build/Products/Debug/$name',
+      cargoRelease,
+      cargoDebug,
+    ];
+  }
+  if (Platform.isWindows) {
+    return [
+      'build/windows/x64/runner/Release/$name',
+      'build/windows/x64/runner/Debug/$name',
+      cargoRelease,
+      cargoDebug,
+    ];
+  }
+  return [cargoRelease, cargoDebug];
+}
 
 /// Returns the path to a usable Rust lib, building it if none is present.
 /// Never returns null silently — throws/fails so the FFI boundary is always
 /// exercised (no false-green skip).
 Future<String> _findOrBuildLib() async {
-  for (final p in _candidates) {
+  for (final p in _libCandidates()) {
     if (File(p).existsSync()) return p;
   }
   // No artifact yet: build it so this test actually runs.
@@ -35,7 +65,7 @@ Future<String> _findOrBuildLib() async {
     fail('Failed to build the Rust lib for the FFI test '
         '(`cargo build` in $_rustDir/ exited ${result.exitCode}):\n${result.stderr}');
   }
-  final built = '$_rustDir/target/debug/$_libName';
+  final built = '$_rustDir/target/debug/${_rustLibFileName()}';
   if (!File(built).existsSync()) {
     fail('cargo build succeeded but $built was not produced.');
   }
