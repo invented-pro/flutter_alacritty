@@ -164,4 +164,53 @@ double_click_threshold = 400
       expect(c.colors.foreground, 0xABCDEF);  // parsed
     });
   });
+
+  group('ime config', () {
+    test('defaults match the spec (preedit_bg #282828, fg #d8d8d8, underline true)', () {
+      final c = TerminalConfig.defaults().ime;
+      expect(c.preeditBg, 0x282828);
+      expect(c.preeditFg, 0xD8D8D8);
+      expect(c.underline, isTrue);
+    });
+
+    test('[ime] section parses preedit_bg/preedit_fg/underline', () {
+      const toml = '''
+[ime]
+preedit_bg = "#102030"
+preedit_fg = "#aabbcc"
+underline = false
+''';
+      final c = TerminalConfig.fromTomlString(toml).ime;
+      expect(c.preeditBg, 0x102030);
+      expect(c.preeditFg, 0xAABBCC);
+      expect(c.underline, isFalse);
+    });
+
+    test('missing [ime] section falls back to defaults', () {
+      final c = TerminalConfig.fromTomlString('').ime;
+      expect(c.preeditBg, 0x282828);
+      expect(c.preeditFg, 0xD8D8D8);
+      expect(c.underline, isTrue);
+    });
+
+    test('bad color in [ime] falls back per-field; siblings still parse', () {
+      const toml = '''
+[ime]
+preedit_bg = "not-a-color"
+preedit_fg = "#abcdef"
+''';
+      final c = TerminalConfig.fromTomlString(toml).ime;
+      expect(c.preeditBg, 0x282828);   // default (bad)
+      expect(c.preeditFg, 0xABCDEF);   // parsed
+      expect(c.underline, isTrue);     // default
+    });
+
+    test('copyWith of ime independent of other sections', () {
+      final base = TerminalConfig.defaults();
+      final c = base.copyWith(ime: const ImeConfig(
+        preeditBg: 0x010203, preeditFg: 0x040506, underline: false));
+      expect(c.ime.preeditBg, 0x010203);
+      expect(c.colors.background, base.colors.background); // unchanged
+    });
+  });
 }

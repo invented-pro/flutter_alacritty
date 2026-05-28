@@ -138,6 +138,26 @@ class BellConfig {
       );
 }
 
+class ImeConfig {
+  const ImeConfig({
+    required this.preeditBg,
+    required this.preeditFg,
+    required this.underline,
+  });
+
+  /// Background color for the preedit overlay (packed RGB; alpha is forced to full).
+  final int preeditBg;
+  final int preeditFg;
+  final bool underline;
+
+  ImeConfig copyWith({int? preeditBg, int? preeditFg, bool? underline}) =>
+      ImeConfig(
+        preeditBg: preeditBg ?? this.preeditBg,
+        preeditFg: preeditFg ?? this.preeditFg,
+        underline: underline ?? this.underline,
+      );
+}
+
 /// Immutable, programmatic terminal configuration. Build with [TerminalConfig.defaults]
 /// + [copyWith], or parse from TOML via [fromTomlString]. No file IO here — that lives
 /// in ConfigLoader, so a library host can use this directly with no file.
@@ -149,6 +169,7 @@ class TerminalConfig {
     required this.scrolling,
     required this.mouse,
     required this.bell,
+    required this.ime,
   });
 
   final TerminalColors colors;
@@ -157,6 +178,7 @@ class TerminalConfig {
   final ScrollConfig scrolling;
   final MouseConfig mouse;
   final BellConfig bell;
+  final ImeConfig ime;
 
   /// The v1 look-and-feel, verbatim.
   factory TerminalConfig.defaults() => const TerminalConfig(
@@ -185,6 +207,7 @@ class TerminalConfig {
         scrolling: ScrollConfig(history: 10000, multiplier: 3),
         mouse: MouseConfig(doubleClickThreshold: 300),
         bell: BellConfig(color: 0xFFFFFF, duration: 0, animation: 'linear'),
+        ime: ImeConfig(preeditBg: 0x282828, preeditFg: 0xD8D8D8, underline: true),
       );
 
   TerminalConfig copyWith({
@@ -194,6 +217,7 @@ class TerminalConfig {
     ScrollConfig? scrolling,
     MouseConfig? mouse,
     BellConfig? bell,
+    ImeConfig? ime,
   }) =>
       TerminalConfig(
         colors: colors ?? this.colors,
@@ -202,6 +226,7 @@ class TerminalConfig {
         scrolling: scrolling ?? this.scrolling,
         mouse: mouse ?? this.mouse,
         bell: bell ?? this.bell,
+        ime: ime ?? this.ime,
       );
 
   /// TextStyle the renderer measures cells from and feeds the glyph cache.
@@ -291,10 +316,16 @@ class TerminalConfig {
       return v is String ? v : fallback;
     }
 
+    bool boolean(Map m, String key, bool fallback) {
+      final v = m[key];
+      return v is bool ? v : fallback;
+    }
+
     final cursorM = section(map, 'cursor');
     final scrollM = section(map, 'scrolling');
     final mouseM = section(map, 'mouse');
     final bellM = section(map, 'bell');
+    final imeM = section(map, 'ime');
 
     return TerminalConfig(
       colors: TerminalColors(
@@ -330,6 +361,11 @@ class TerminalConfig {
         color: color(bellM, 'color', d.bell.color),
         duration: integer(bellM, 'duration', d.bell.duration),
         animation: str(bellM, 'animation', d.bell.animation),
+      ),
+      ime: ImeConfig(
+        preeditBg: color(imeM, 'preedit_bg', d.ime.preeditBg),
+        preeditFg: color(imeM, 'preedit_fg', d.ime.preeditFg),
+        underline: boolean(imeM, 'underline', d.ime.underline),
       ),
     );
   }
