@@ -19,6 +19,7 @@ import '../render/cell_metrics.dart';
 import '../render/glyph_cache.dart';
 import '../render/mirror_grid.dart';
 import '../render/terminal_painter.dart';
+import 'search_bar.dart';
 
 typedef PtyFactory = PtyBackend Function({
   required int rows,
@@ -97,6 +98,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   TermStatus _status = TermStatus.running;
   int? _exitCode;
   String? _errorMessage;
+  bool _searchOpen = false;
 
   // Repaint is driven by CustomPaint(repaint: _grid): MirrorGrid.apply() notifies,
   // RenderCustomPaint marks needs-paint, and the client requests a frame when it
@@ -209,6 +211,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
       }
       return KeyEventResult.handled;
     }
+    if (hw.isControlPressed &&
+        hw.isShiftPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyF) {
+      setState(() => _searchOpen = !_searchOpen);
+      if (!_searchOpen) _client?.searchClear();
+      return KeyEventResult.handled;
+    }
     final bytes = encodeKey(
       event.logicalKey,
       event.character,
@@ -224,6 +233,19 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _refreshSelection();
     _pty?.write(bytes);
     return KeyEventResult.handled;
+  }
+
+  void _searchChanged(String pattern) {
+    if (pattern.isEmpty) {
+      _client?.searchClear();
+    } else {
+      _client?.searchSet(pattern);
+    }
+  }
+
+  void _closeSearch() {
+    setState(() => _searchOpen = false);
+    _client?.searchClear();
   }
 
   Future<void> _paste() async {
@@ -417,6 +439,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
                             ),
                           ),
                         ),
+                      ),
+                    ),
+                  if (_searchOpen)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: TerminalSearchBar(
+                        onChanged: _searchChanged,
+                        onNext: () => _client?.searchNext(),
+                        onPrev: () => _client?.searchPrev(),
+                        onClose: _closeSearch,
                       ),
                     ),
                 ],

@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/engine_binding.dart';
 import 'package:flutter_alacritty/pty/pty_backend.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
+import 'package:flutter_alacritty/ui/search_bar.dart';
 import 'package:flutter_alacritty/ui/terminal_screen.dart';
 
 class _FakePty implements PtyBackend {
@@ -147,6 +149,32 @@ void main() {
     await tester.pump();
     final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
     expect(scaffold.backgroundColor, const Color(0xFF102030));
+    title.dispose();
+  });
+
+  testWidgets('Ctrl+Shift+F toggles the search bar', (tester) async {
+    final title = ValueNotifier<String>('t');
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalScreen(
+        title: title,
+        ptyFactory: ({required rows, required columns}) => _FakePty(),
+        engineFactory: ({
+          required columns, required rows,
+          required onPtyWrite, required onTitle,
+          required onBell, required onClipboard, required engineConfig,
+        }) => _FakeBinding(),
+      ),
+    ));
+    await tester.pump();
+    expect(find.byType(TerminalSearchBar), findsNothing);
+    // Open with Ctrl+Shift+F.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(find.byType(TerminalSearchBar), findsOneWidget);
     title.dispose();
   });
 }
