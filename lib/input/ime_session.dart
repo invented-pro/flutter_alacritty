@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/services.dart';
 
 /// Owns the platform TextInput connection for the terminal view. Parses
