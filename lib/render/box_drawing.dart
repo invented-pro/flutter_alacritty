@@ -11,6 +11,14 @@ class LineOp extends BoxOp {
   final double width;
 }
 
+class DashOp extends BoxOp {
+  DashOp(this.a, this.b, this.width, this.segments);
+  final Offset a;
+  final Offset b;
+  final double width;
+  final int segments;
+}
+
 class RectOp extends BoxOp {
   RectOp(this.rect, this.alpha);
   final Rect rect;
@@ -43,6 +51,33 @@ const Map<int, List<int>> _arms = {
   0x2560: [3, 3, 0, 3], 0x2563: [3, 3, 3, 0], // ╠ ╣
   0x2566: [0, 3, 3, 3], 0x2569: [3, 0, 3, 3], // ╦ ╩
   0x256C: [3, 3, 3, 3], // ╬
+  // Mixed light/heavy junctions & corners (U+2500-254B long-tail).
+  0x250D: [0, 1, 0, 2], 0x250E: [0, 2, 0, 1], 0x250F: [0, 2, 0, 2], // ┍ ┎ ┏
+  0x2511: [0, 1, 2, 0], 0x2512: [0, 2, 1, 0], 0x2513: [0, 2, 2, 0], // ┑ ┒ ┓
+  0x2515: [1, 0, 0, 2], 0x2516: [2, 0, 0, 1], 0x2517: [2, 0, 0, 2], // ┕ ┖ ┗
+  0x2519: [1, 0, 2, 0], 0x251A: [2, 0, 1, 0], 0x251B: [2, 0, 2, 0], // ┙ ┚ ┛
+  0x251D: [1, 1, 0, 2], 0x251E: [2, 1, 0, 1], 0x251F: [1, 2, 0, 1], // ┝ ┞ ┟
+  0x2520: [2, 2, 0, 1], 0x2521: [2, 1, 0, 2], 0x2522: [1, 2, 0, 2], 0x2523: [2, 2, 0, 2], // ┠ ┡ ┢ ┣
+  0x2525: [1, 1, 2, 0], 0x2526: [2, 1, 1, 0], 0x2527: [1, 2, 1, 0], // ┥ ┦ ┧
+  0x2528: [2, 2, 1, 0], 0x2529: [2, 1, 2, 0], 0x252A: [1, 2, 2, 0], 0x252B: [2, 2, 2, 0], // ┨ ┩ ┪ ┫
+  0x252D: [0, 1, 2, 1], 0x252E: [0, 1, 1, 2], 0x252F: [0, 1, 2, 2], // ┭ ┮ ┯
+  0x2530: [0, 2, 1, 1], 0x2531: [0, 2, 2, 1], 0x2532: [0, 2, 1, 2], 0x2533: [0, 2, 2, 2], // ┰ ┱ ┲ ┳
+  0x2535: [1, 0, 2, 1], 0x2536: [1, 0, 1, 2], 0x2537: [1, 0, 2, 2], // ┵ ┶ ┷
+  0x2538: [2, 0, 1, 1], 0x2539: [2, 0, 2, 1], 0x253A: [2, 0, 1, 2], 0x253B: [2, 0, 2, 2], // ┸ ┹ ┺ ┻
+  0x253D: [1, 1, 2, 1], 0x253E: [1, 1, 1, 2], 0x253F: [1, 1, 2, 2], // ┽ ┾ ┿
+  0x2540: [2, 1, 1, 1], 0x2541: [1, 2, 1, 1], 0x2542: [2, 2, 1, 1], // ╀ ╁ ╂
+  0x2543: [2, 1, 2, 1], 0x2544: [2, 1, 1, 2], 0x2545: [1, 2, 2, 1], 0x2546: [1, 2, 1, 2], // ╃ ╄ ╅ ╆
+  0x2547: [2, 1, 2, 2], 0x2548: [1, 2, 2, 2], 0x2549: [2, 2, 2, 1], 0x254A: [2, 2, 1, 2], 0x254B: [2, 2, 2, 2], // ╇ ╈ ╉ ╊ ╋
+  // Single/double mixed junctions & corners (U+2552-256B; 1 light, 3 double).
+  0x2552: [0, 1, 0, 3], 0x2553: [0, 3, 0, 1], // ╒ ╓
+  0x2555: [0, 1, 3, 0], 0x2556: [0, 3, 1, 0], // ╕ ╖
+  0x2558: [1, 0, 0, 3], 0x2559: [3, 0, 0, 1], // ╘ ╙
+  0x255B: [1, 0, 3, 0], 0x255C: [3, 0, 1, 0], // ╛ ╜
+  0x255E: [1, 1, 0, 3], 0x255F: [3, 3, 0, 1], // ╞ ╟
+  0x2561: [1, 1, 3, 0], 0x2562: [3, 3, 1, 0], // ╡ ╢
+  0x2564: [0, 1, 3, 3], 0x2565: [0, 3, 1, 1], // ╤ ╥
+  0x2567: [1, 0, 3, 3], 0x2568: [3, 0, 1, 1], // ╧ ╨
+  0x256A: [1, 1, 3, 3], 0x256B: [3, 3, 1, 1], // ╪ ╫
 };
 
 double _w(int weight, double lineWidth) => weight == 2 ? lineWidth * 1.8 : lineWidth;
@@ -50,6 +85,8 @@ double _w(int weight, double lineWidth) => weight == 2 ? lineWidth * 1.8 : lineW
 /// Returns the draw ops for [cp] within [cell]. Empty if [cp] is not handled
 /// programmatically (caller falls back to the font glyph).
 List<BoxOp> boxOps(int cp, Rect cell, double lineWidth) {
+  final dash = _dashedOps(cp, cell, lineWidth);
+  if (dash.isNotEmpty) return dash;
   final arms = _arms[cp];
   if (arms != null) return _armOps(arms, cell, lineWidth);
   if (cp >= 0x256D && cp <= 0x2570) return _roundedOps(cp, cell, lineWidth);
@@ -217,6 +254,27 @@ List<BoxOp> _armOps(List<int> arms, Rect cell, double lineWidth) {
   return ops;
 }
 
+// Dashed lines: 2504-250B (light/heavy triple/quadruple) + 254C-254F (double).
+List<BoxOp> _dashedOps(int cp, Rect cell, double lineWidth) {
+  // (segments, heavy, vertical) by codepoint.
+  const table = <int, (int, bool, bool)>{
+    0x2504: (3, false, false), 0x2505: (3, true, false), // ┄ ┅ horizontal triple
+    0x2506: (3, false, true), 0x2507: (3, true, true), //   ┆ ┇ vertical triple
+    0x2508: (4, false, false), 0x2509: (4, true, false), // ┈ ┉ horizontal quad
+    0x250A: (4, false, true), 0x250B: (4, true, true), //   ┊ ┋ vertical quad
+    0x254C: (2, false, false), 0x254D: (2, true, false), // ╌ ╍ horizontal double
+    0x254E: (2, false, true), 0x254F: (2, true, true), //   ╎ ╏ vertical double
+  };
+  final spec = table[cp];
+  if (spec == null) return const [];
+  final (segments, heavy, vertical) = spec;
+  final cx = cell.center.dx, cy = cell.center.dy;
+  final w = heavy ? lineWidth * 1.8 : lineWidth;
+  final a = vertical ? Offset(cx, cell.top) : Offset(cell.left, cy);
+  final b = vertical ? Offset(cx, cell.bottom) : Offset(cell.right, cy);
+  return [DashOp(a, b, w, segments)];
+}
+
 /// Renders [cp]'s ops into [cell] with [fg]. No-op (returns false) if [cp] has
 /// no programmatic ops, so the caller can fall back to the font glyph.
 bool paintBoxGlyph(Canvas canvas, Rect cell, int cp, Color fg, double lineWidth) {
@@ -238,6 +296,16 @@ bool paintBoxGlyph(Canvas canvas, Rect cell, int cp, Color fg, double lineWidth)
       case ArcOp(:final bounds, :final startAngle, :final sweepAngle, :final width):
         stroke.strokeWidth = width;
         canvas.drawArc(bounds, startAngle, sweepAngle, false, stroke);
+      case DashOp(:final a, :final b, :final width, :final segments):
+        stroke.strokeWidth = width;
+        // Each segment occupies 2/3 of its slot, leaving a 1/3 gap.
+        final dx = (b.dx - a.dx) / segments;
+        final dy = (b.dy - a.dy) / segments;
+        for (var i = 0; i < segments; i++) {
+          final s = Offset(a.dx + dx * i, a.dy + dy * i);
+          final e = Offset(a.dx + dx * (i + 0.66), a.dy + dy * (i + 0.66));
+          canvas.drawLine(s, e, stroke);
+        }
     }
   }
   return true;

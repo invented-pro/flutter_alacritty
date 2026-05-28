@@ -94,4 +94,37 @@ void main() {
       Rect.fromLTRB(cell.center.dx, cell.center.dy, cell.right, cell.bottom),
     );
   });
+
+  test('mixed light/heavy tee has a heavy arm and light arms', () {
+    // ┝ U+251D: up light, down light, right heavy (left none).
+    final ops = boxOps(0x251D, const Rect.fromLTWH(0, 0, 10, 20), 1.0);
+    final lines = ops.whereType<LineOp>().toList();
+    expect(lines.length, greaterThanOrEqualTo(3));
+    // The right arm is heavy (width 1.8), the vertical arms are light (1.0).
+    expect(lines.any((l) => l.width == 1.8), isTrue);
+    expect(lines.any((l) => l.width == 1.0), isTrue);
+  });
+
+  test('single/double mixed corner emits a light and a double arm', () {
+    // ╒ U+2552: down single (light), right double.
+    final ops = boxOps(0x2552, const Rect.fromLTWH(0, 0, 10, 20), 1.0);
+    final lines = ops.whereType<LineOp>().toList();
+    // double arm = two parallel strokes → at least 3 line ops total.
+    expect(lines.length, greaterThanOrEqualTo(3));
+  });
+
+  test('light triple dash horizontal emits a 3-segment DashOp', () {
+    final ops = boxOps(0x2504, const Rect.fromLTWH(0, 0, 12, 20), 1.0); // ┄
+    final dash = ops.whereType<DashOp>().single;
+    expect(dash.segments, 3);
+    expect(dash.a.dy, dash.b.dy); // horizontal
+  });
+
+  test('heavy quadruple dash vertical is a 4-segment heavy DashOp', () {
+    final ops = boxOps(0x250B, const Rect.fromLTWH(0, 0, 12, 20), 1.0); // ┋
+    final dash = ops.whereType<DashOp>().single;
+    expect(dash.segments, 4);
+    expect(dash.a.dx, dash.b.dx); // vertical
+    expect(dash.width, 1.8); // heavy
+  });
 }
