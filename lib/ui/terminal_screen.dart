@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart' as launcher;
 
 import '../config/terminal_config.dart';
+import '../controller/terminal_controller.dart';
 import '../engine/terminal_engine.dart';
 import '../input/ime_session.dart';
 import '../input/key_input.dart';
@@ -106,6 +107,10 @@ class _TerminalScreenState extends State<TerminalScreen>
   // Lazy-built so a spawn failure can reach `_status == error` without
   // having already paid binding-construction cost. Recreated on restart.
   TerminalEngine? _engine;
+  // View-model owning selection/search/scroll state that was previously
+  // inline fields on this State. Attached to _engine each _start; reset on
+  // _restart (one-shot attach contract).
+  TerminalController _controller = TerminalController();
   // Empty placeholder so the painter has something to bind before the engine
   // exists (and during error overlay). Owned by State so it's disposed once.
   late final MirrorGrid _placeholderGrid = MirrorGrid(
@@ -160,18 +165,14 @@ class _TerminalScreenState extends State<TerminalScreen>
   int _clickCount = 0;
   DateTime _lastClick = DateTime.fromMillisecondsSinceEpoch(0);
   bool _selecting = false;
-  // Mirrors engine selection presence on the Dart side so the per-keystroke
-  // `selectionClear + full snapshot` only runs when there is something to clear
-  // (alacritty event.rs:on_terminal_input_start does the same — dirty bit is
-  // OR'd only when the taken selection was non-empty).
-  bool _selectionActive = false;
+  // Selection presence, primary buffer, search pattern + validity now live on
+  // _controller — see TerminalController. Only UI-visibility state remains on
+  // the widget (e.g. _searchOpen below).
   Rect? _lastReportedCaretRect;
-  String _primary = '';
   TermStatus _status = TermStatus.running;
   int? _exitCode;
   String? _errorMessage;
   bool _searchOpen = false;
-  bool _searchInvalid = false;
   double _touchScrollAccum = 0;
   Timer? _flingTimer;
   MouseCursor _hoverCursor = MouseCursor.defer;
@@ -219,6 +220,7 @@ class _TerminalScreenState extends State<TerminalScreen>
         engineFactory: widget.engineFactory,
       );
       _engine = engine;
+      _controller.attach(engine);
       engine.title.addListener(_syncTitle);
       _bellSub = engine.bell.listen((_) => _flashBell());
       _clipSub = engine.clipboardStore
@@ -258,7 +260,13 @@ class _TerminalScreenState extends State<TerminalScreen>
     _ime.detach();
     _pty?.kill();
     _engine?.title.removeListener(_syncTitle);
+    // Dispose the controller before the engine: the controller holds the
+    // engine ref, and if any listener fired between the two it would touch a
+    // disposed engine. attach() is one-shot, so the next _start needs a fresh
+    // controller anyway.
+    _controller.dispose();
     _engine?.dispose();
+    _controller = TerminalController();
     _outputSub = null;
     _engineOutputSub = null;
     _bellSub = null;
@@ -321,9 +329,8 @@ class _TerminalScreenState extends State<TerminalScreen>
         event.logicalKey == LogicalKeyboardKey.keyF) {
       setState(() {
         _searchOpen = !_searchOpen;
-        if (!_searchOpen) _searchInvalid = false;
       });
-      if (!_searchOpen) _engine?.searchClear();
+      if (!_searchOpen) _controller.searchClear();
       return KeyEventResult.handled;
     }
     if (hw.isControlPressed && !hw.isShiftPressed && !hw.isAltPressed) {
@@ -353,7 +360,7 @@ class _TerminalScreenState extends State<TerminalScreen>
     if (hw.isControlPressed &&
         hw.isShiftPressed &&
         event.logicalKey == LogicalKeyboardKey.keyC) {
-      final text = _engine?.selectionText();
+      final text = _controller.readSelectionText();
       if (text != null && text.isNotEmpty) {
         Clipboard.setData(ClipboardData(text: text));
       }
@@ -396,29 +403,27 @@ class _TerminalScreenState extends State<TerminalScreen>
     if (scrolledBack) {
       _engine?.scrollToBottom();
     }
-    if (_selectionActive) {
-      _engine?.selectionClear();
-      _selectionActive = false;
+    if (_controller.selectionActive) {
+      _controller.clearSelection();
       if (!scrolledBack) _refreshSelection();
     }
   }
 
   void _searchChanged(String pattern) {
     if (pattern.isEmpty) {
-      _engine?.searchClear();
-      setState(() => _searchInvalid = false);
+      _controller.searchClear();
     } else {
-      final ok = _engine?.searchSet(pattern) ?? false;
-      setState(() => _searchInvalid = !ok);
+      _controller.searchSet(pattern);
     }
+    // Rebuild so the search bar picks up the updated _controller.searchValid.
+    setState(() {});
   }
 
   void _closeSearch() {
     setState(() {
       _searchOpen = false;
-      _searchInvalid = false;
     });
-    _engine?.searchClear();
+    _controller.searchClear();
   }
 
   Future<void> _paste() async {
@@ -626,6 +631,8 @@ class _TerminalScreenState extends State<TerminalScreen>
     _clipSub?.cancel();
     _pty?.kill();
     _engine?.title.removeListener(_syncTitle);
+    // Controller before engine: see _restart() for rationale.
+    _controller.dispose();
     _engine?.dispose();
     _placeholderGrid.dispose();
     _focus.removeListener(_reportFocus);
@@ -683,17 +690,17 @@ class _TerminalScreenState extends State<TerminalScreen>
                       : 1;
                   _lastClick = now;
                   final (r, c, rh) = _cellAt(e.localPosition);
-                  _engine!.selectionStart(r, c, rh, _clickCount - 1);
+                  _controller.selectionStart(r, c, rh, _clickCount - 1);
                   _selecting = true;
-                  _selectionActive = true;
                   _refreshSelection();
                   return;
                 }
                 if (!anyMouse(_grid.modeFlags) &&
                     e.buttons & kMiddleMouseButton != 0 &&
-                    _primary.isNotEmpty) {
+                    _controller.primary.isNotEmpty) {
                   _onTerminalInputStart();
-                  _engine?.write(pasteBytes(_primary, modeFlags: _grid.modeFlags));
+                  _engine?.write(
+                      pasteBytes(_controller.primary, modeFlags: _grid.modeFlags));
                   return;
                 }
                 if (e.buttons & kSecondaryButton != 0 &&
@@ -708,7 +715,7 @@ class _TerminalScreenState extends State<TerminalScreen>
                 if (e.kind != PointerDeviceKind.mouse) return;
                 if (_selecting && _engine != null) {
                   final (r, c, rh) = _cellAt(e.localPosition);
-                  _engine!.selectionUpdate(r, c, rh);
+                  _controller.selectionUpdate(r, c, rh);
                   _refreshSelection();
                   return;
                 }
@@ -725,7 +732,7 @@ class _TerminalScreenState extends State<TerminalScreen>
                 if (e.kind != PointerDeviceKind.mouse) return;
                 if (_selecting && _engine != null) {
                   _selecting = false;
-                  _primary = _engine!.selectionText() ?? '';
+                  _controller.capturePrimary();
                   return;
                 }
                 _reportMouse(e.localPosition, _pressedButton, MouseAction.up);
@@ -745,7 +752,7 @@ class _TerminalScreenState extends State<TerminalScreen>
                   }
                   return;
                 }
-                _engine?.scrollLines(
+                _controller.scrollLines(
                     up ? _config.scrolling.multiplier : -_config.scrolling.multiplier);
               },
               // Precision trackpad two-finger pan (PointerDeviceKind.trackpad):
@@ -767,9 +774,8 @@ class _TerminalScreenState extends State<TerminalScreen>
                     return;
                   }
                   _focus.requestFocus();
-                  if (_engine != null && _selectionActive) {
-                    _engine!.selectionClear();
-                    _selectionActive = false;
+                  if (_engine != null && _controller.selectionActive) {
+                    _controller.clearSelection();
                     _refreshSelection();
                   }
                 },
@@ -795,21 +801,20 @@ class _TerminalScreenState extends State<TerminalScreen>
                   _focus.requestFocus();
                   if (_engine == null) return;
                   final (r, c, rh) = _cellAt(e.localPosition);
-                  _engine!.selectionStart(r, c, rh, 0);
+                  _controller.selectionStart(r, c, rh, 0);
                   _selecting = true;
-                  _selectionActive = true;
                   _refreshSelection();
                 },
                 onLongPressMoveUpdate: (e) {
                   if (_engine == null) return;
                   final (r, c, rh) = _cellAt(e.localPosition);
-                  _engine!.selectionUpdate(r, c, rh);
+                  _controller.selectionUpdate(r, c, rh);
                   _refreshSelection();
                 },
                 onLongPressEnd: (e) {
                   if (_engine == null) return;
                   _selecting = false;
-                  _primary = _engine!.selectionText() ?? '';
+                  _controller.capturePrimary();
                 },
                 child: Stack(
                 children: [
@@ -871,10 +876,10 @@ class _TerminalScreenState extends State<TerminalScreen>
                       offstage: !_searchOpen,
                       child: TerminalSearchBar(
                         visible: _searchOpen,
-                        invalidPattern: _searchInvalid,
+                        invalidPattern: !_controller.searchValid,
                         onChanged: _searchChanged,
-                        onNext: () => _engine?.searchNext(),
-                        onPrev: () => _engine?.searchPrev(),
+                        onNext: _controller.searchNext,
+                        onPrev: _controller.searchPrev,
                         onClose: _closeSearch,
                       ),
                     ),
