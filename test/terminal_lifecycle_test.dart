@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +9,7 @@ import 'package:flutter_alacritty/engine/engine_binding.dart';
 import 'package:flutter_alacritty/pty/pty_backend.dart';
 import 'package:flutter_alacritty/render/cell_flags.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
+import 'package:flutter_alacritty/render/terminal_painter.dart';
 import 'package:flutter_alacritty/ui/search_bar.dart';
 import 'package:flutter_alacritty/ui/terminal_screen.dart';
 
@@ -17,13 +17,12 @@ class _FakePty implements PtyBackend {
   final _out = StreamController<Uint8List>.broadcast();
   final exit = Completer<int>();
   bool killed = false;
-  final writes = <Uint8List>[];
   @override
   Stream<Uint8List> get output => _out.stream;
   @override
   Future<int> get exitCode => exit.future;
   @override
-  void write(Uint8List data) => writes.add(data);
+  void write(Uint8List data) {}
   @override
   void resize(int rows, int columns) {}
   @override
@@ -40,7 +39,6 @@ class _ClearOnTapBinding extends _FakeBinding {
 class _FakeBinding implements EngineBinding {
   int scrollCalls = 0;
   int selStartCalls = 0;
-  int modeFlags = 0;
   final Map<(int, int), int> hyperlinkAt = {};
   final Map<int, String> hyperlinkUris = {};
 
@@ -54,7 +52,6 @@ class _FakeBinding implements EngineBinding {
           flags: Uint16List(1),
         )],
         cursorRow: 0, cursorCol: 0, cursorVisible: true,
-        modeFlags: modeFlags,
       );
 
   GridUpdate _hyperlinkSnapshot() {
@@ -91,7 +88,6 @@ class _FakeBinding implements EngineBinding {
       cursorRow: 0,
       cursorCol: 0,
       cursorVisible: false,
-      modeFlags: modeFlags,
     );
   }
 
@@ -403,35 +399,40 @@ void main() {
     title.dispose();
   });
 
-  testWidgets('drop writes shell-quoted, bracketed-paste-encoded paths', (tester) async {
+  testWidgets('Ctrl+= increases cellHeight, Ctrl+0 restores', (tester) async {
     final title = ValueNotifier<String>('t');
-    final pty = _FakePty();
-    final binding = _FakeBinding()..modeFlags = (1 << 4); // kModeBracketedPaste
     await tester.pumpWidget(MaterialApp(home: TerminalScreen(
       title: title,
-      ptyFactory: ({required rows, required columns}) => pty,
+      ptyFactory: ({required rows, required columns}) => _FakePty(),
       engineFactory: ({
         required columns, required rows,
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required engineConfig,
-      }) => binding,
+      }) => _FakeBinding(),
     )));
     await tester.pump();
-    // Sync engine mode flags into the mirror grid (same path as selection refresh).
-    await tester.tap(find.byType(CustomPaint).first);
+    double cellH() {
+      for (final paint in tester.widgetList<CustomPaint>(find.byType(CustomPaint))) {
+        if (paint.painter is TerminalPainter) {
+          return (paint.painter as TerminalPainter).cellHeight;
+        }
+      }
+      return 0.0;
+    }
+    final h0 = cellH();
+    expect(h0, greaterThan(0));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.equal);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.equal);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
-    final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
-    (state as dynamic).simulateDrop([
-      DropItemFile('/tmp/plain'),
-      DropItemFile('/tmp/with space'),
-    ]);
+    expect(cellH(), greaterThan(h0));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.digit0);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.digit0);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
-    final bytes = pty.writes.expand((e) => e).toList();
-    final written = String.fromCharCodes(bytes);
-    expect(written.contains('\x1b[200~'), isTrue);
-    expect(written.contains('/tmp/plain'), isTrue);
-    expect(written.contains("'/tmp/with space'"), isTrue);
-    expect(written.contains('\x1b[201~'), isTrue);
+    expect(cellH(), h0);
     title.dispose();
   });
 }

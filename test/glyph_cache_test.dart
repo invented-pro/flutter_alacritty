@@ -48,4 +48,12 @@ void main() {
     cache.beginFrame();
     expect(cache.tryGet(0x42, 0xFFFFFF), isNotNull); // budget reset
   });
+
+  test('dispose clears the cache', () {
+    final cache = GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
+    cache.tryGet(0x41, 0xFFFFFF);
+    expect(cache.length, greaterThan(0));
+    cache.dispose();
+    expect(cache.length, 0);
+  });
 }

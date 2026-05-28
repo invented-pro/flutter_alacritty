@@ -34,6 +34,13 @@ class GlyphCache {
 
   int get length => _cache.length;
 
+  /// Clears the cached paragraphs. Call before rebuilding the cache with new
+  /// font metrics (e.g. on font-zoom).
+  void dispose() {
+    _cache.clear();
+    _buildsThisFrame = 0;
+  }
+
   void beginFrame() => _buildsThisFrame = 0;
 
   /// Returns a cached paragraph, or builds one if under the per-frame budget.

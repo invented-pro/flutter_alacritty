@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,32 +21,6 @@ import '../render/glyph_cache.dart';
 import '../render/mirror_grid.dart';
 import '../render/terminal_painter.dart';
 import 'search_bar.dart';
-
-String _shellQuote(String s) {
-  const needs = [
-    ' ',
-    '\t',
-    '\'',
-    '"',
-    r'$',
-    '`',
-    r'\',
-    '*',
-    '?',
-    '|',
-    '&',
-    ';',
-    '<',
-    '>',
-    '(',
-    ')',
-    '#',
-    '!',
-    '~',
-  ];
-  if (!needs.any(s.contains)) return s;
-  return "'${s.replaceAll("'", r"'\''")}'";
-}
 
 typedef PtyFactory = PtyBackend Function({
   required int rows,
@@ -342,20 +315,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _pty!.write(pasteBytes(text, modeFlags: _grid.modeFlags));
   }
 
-  Future<void> _onDrop(DropDoneDetails details) async {
-    final paths = details.files.map((f) => f.path).where((p) => p.isNotEmpty);
-    if (paths.isEmpty) return;
-    final joined = paths.map(_shellQuote).join(' ');
-    _pty?.write(pasteBytes(joined, modeFlags: _grid.modeFlags));
-  }
-
-  @visibleForTesting
-  void simulateDrop(List<DropItem> files) => _onDrop(DropDoneDetails(
-        files: files,
-        localPosition: Offset.zero,
-        globalPosition: Offset.zero,
-      ));
-
   void _reportFocus() {
     if (_pty == null || !focusReport(_grid.modeFlags)) {
       _lastFocused = _focus.hasFocus;
@@ -464,9 +423,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
             focusNode: _focus,
             autofocus: true,
             onKeyEvent: _onKey,
-            child: DropTarget(
-              onDragDone: _onDrop,
-              child: Listener(
+            child: Listener(
               onPointerDown: (e) {
                 if (e.kind != PointerDeviceKind.mouse) return;
                 if (_status != TermStatus.running) {
@@ -689,7 +646,6 @@ class _TerminalScreenState extends State<TerminalScreen> {
                 ],
               ),
               ),
-            ),
             ),
           );
         },
