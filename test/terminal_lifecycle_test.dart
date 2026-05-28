@@ -13,6 +13,7 @@ import 'package:flutter_alacritty/render/terminal_painter.dart';
 import 'package:flutter_alacritty/ui/preedit_overlay.dart';
 import 'package:flutter_alacritty/ui/search_bar.dart';
 import 'package:flutter_alacritty/ui/terminal_screen.dart';
+import 'package:flutter_alacritty/ui/terminal_view.dart';
 
 import 'fake_binding.dart';
 
@@ -400,7 +401,7 @@ void main() {
       ),
     ));
     await tester.pump();
-    final state = tester.state(find.byType(TerminalScreen));
+    final state = tester.state(find.byType(TerminalView));
     (state as dynamic).flashBellForTest();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
@@ -515,7 +516,7 @@ void main() {
       }) => FakeBinding(),
     )));
     await tester.pump();
-    final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
+    final state = tester.state<State<TerminalView>>(find.byType(TerminalView));
     final ime = (state as dynamic).imeForTest as ImeSession;
     // preedit: "n" -> "ni" -> commit "你"
     ime.updateEditingValue(const TextEditingValue(text: 'n', composing: TextRange(start: 0, end: 1)));
@@ -541,7 +542,7 @@ void main() {
       }) => FakeBinding(),
     )));
     await tester.pump();
-    final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
+    final state = tester.state<State<TerminalView>>(find.byType(TerminalView));
     final ime = (state as dynamic).imeForTest as ImeSession;
     expect(find.byType(PreeditOverlay), findsNothing);
     ime.updateEditingValue(const TextEditingValue(text: 'ni', composing: TextRange(start: 0, end: 2)));
@@ -569,7 +570,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byType(CustomPaint).first);
     await tester.pump();
-    final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
+    final state = tester.state<State<TerminalView>>(find.byType(TerminalView));
     final ime = (state as dynamic).imeForTest as ImeSession;
     expect(ime.isAttached, isTrue);
     expect(ime.isComposing, isFalse);
@@ -635,7 +636,7 @@ void main() {
     // Focus the terminal so the IME is attached.
     await tester.tap(find.byType(CustomPaint).first);
     await tester.pump();
-    final state = tester.state<State<TerminalScreen>>(find.byType(TerminalScreen));
+    final state = tester.state<State<TerminalView>>(find.byType(TerminalView));
     final ime = (state as dynamic).imeForTest as ImeSession;
     expect(ime.isAttached, isTrue, reason: 'focused terminal should attach IME');
     // Simulate active pinyin composition so the gate applies.

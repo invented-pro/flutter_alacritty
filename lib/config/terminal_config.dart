@@ -4,6 +4,7 @@ import 'package:flutter/painting.dart';
 import 'package:toml/toml.dart';
 
 import '../src/rust/engine.dart' show EngineConfig;
+import '../theme/terminal_theme.dart';
 import 'color_parse.dart';
 
 /// Foreground/background/selection (packed 0x00RRGGBB) + the 16 ANSI colors.
@@ -248,6 +249,29 @@ class TerminalConfig {
         matchFg: colors.searchMatchFg,
         focusedBg: colors.searchFocusedBg,
         focusedFg: colors.searchFocusedFg,
+      );
+
+  /// Theme slice consumed by `TerminalView`. Source of truth stays here.
+  TerminalTheme get theme => TerminalTheme(
+        background: colors.background,
+        foreground: colors.foreground,
+        selection: colors.selection,
+        ansi: colors.ansi,
+        searchMatch: (bg: colors.searchMatchBg, fg: colors.searchMatchFg),
+        searchFocused:
+            (bg: colors.searchFocusedBg, fg: colors.searchFocusedFg),
+        hintStart: (bg: colors.hintStartBg, fg: colors.hintStartFg),
+        cursorText: null,
+        cursorColor: null,
+        bellOverlay: bell.color,
+      );
+
+  /// Font/size slice consumed by `TerminalView`.
+  TerminalStyle get style => TerminalStyle(
+        family: font.family,
+        fallback: font.fallback,
+        size: font.size,
+        lineHeight: font.lineHeight,
       );
 
   /// Palette + scrollback handed to the Rust engine. palette is length 18:
