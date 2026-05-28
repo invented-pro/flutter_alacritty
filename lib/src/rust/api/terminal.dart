@@ -96,3 +96,25 @@ void engineSelectionClear({required TerminalEngine engine}) =>
 
 String? engineSelectionText({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineSelectionText(engine: engine);
+
+bool engineSearchSet({
+  required TerminalEngine engine,
+  required String pattern,
+}) => RustLib.instance.api.crateApiTerminalEngineSearchSet(
+  engine: engine,
+  pattern: pattern,
+);
+
+bool engineSearchNext({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineSearchNext(engine: engine);
+
+bool engineSearchPrev({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineSearchPrev(engine: engine);
+
+void engineSearchClear({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineSearchClear(engine: engine);
+
+RenderUpdate engineFullSnapshotSearched({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineFullSnapshotSearched(
+      engine: engine,
+    );

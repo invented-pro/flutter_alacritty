@@ -99,3 +99,29 @@ pub fn engine_selection_clear(engine: &mut TerminalEngine) {
 pub fn engine_selection_text(engine: &TerminalEngine) -> Option<String> {
     engine.selection_text()
 }
+
+#[frb(sync)]
+pub fn engine_search_set(engine: &mut TerminalEngine, pattern: String) -> bool {
+    std::panic::catch_unwind(AssertUnwindSafe(|| engine.search_set(pattern))).unwrap_or(false)
+}
+
+#[frb(sync)]
+pub fn engine_search_next(engine: &mut TerminalEngine) -> bool {
+    std::panic::catch_unwind(AssertUnwindSafe(|| engine.search_next())).unwrap_or(false)
+}
+
+#[frb(sync)]
+pub fn engine_search_prev(engine: &mut TerminalEngine) -> bool {
+    std::panic::catch_unwind(AssertUnwindSafe(|| engine.search_prev())).unwrap_or(false)
+}
+
+#[frb(sync)]
+pub fn engine_search_clear(engine: &mut TerminalEngine) {
+    engine.search_clear();
+}
+
+#[frb(sync)]
+pub fn engine_full_snapshot_searched(engine: &mut TerminalEngine) -> RenderUpdate {
+    std::panic::catch_unwind(AssertUnwindSafe(|| engine.full_snapshot_searched()))
+        .unwrap_or_else(|_| engine.full_snapshot())
+}

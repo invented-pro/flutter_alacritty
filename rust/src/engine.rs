@@ -2,9 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::event_proxy::{EngineEvent, EventProxy, EventQueue};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::index::{Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::{Cell, Flags};
+use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 use alacritty_terminal::term::{point_to_viewport, viewport_to_point, Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 
@@ -78,6 +79,8 @@ pub const FLAG_WIDE_SPACER: u16 = 1 << 5;
 pub const FLAG_DIM: u16 = 1 << 6;
 pub const FLAG_STRIKEOUT: u16 = 1 << 7;
 pub const FLAG_SELECTED: u16 = 1 << 8;
+pub const FLAG_MATCH: u16 = 1 << 9;
+pub const FLAG_MATCH_CURRENT: u16 = 1 << 10;
 
 const DEFAULT_FG: u32 = 0x00D8_D8D8;
 const DEFAULT_BG: u32 = 0x0018_1818;
@@ -123,6 +126,14 @@ fn point_in_range(p: Point, r: &SelectionRange) -> bool {
     after_start && before_end
 }
 
+fn point_in_match(p: Point, m: &Match) -> bool {
+    let (start, end) = (m.start(), m.end());
+    let after_start =
+        p.line > start.line || (p.line == start.line && p.column >= start.column);
+    let before_end = p.line < end.line || (p.line == end.line && p.column <= end.column);
+    after_start && before_end
+}
+
 fn sel_type(kind: u8) -> SelectionType {
     match kind {
         1 => SelectionType::Semantic,
@@ -136,6 +147,8 @@ pub struct TerminalEngine {
     parser: Processor,
     events: EventQueue,
     palette: [u32; 18],
+    search: Option<RegexSearch>,
+    current_match: Option<Match>,
 }
 
 impl TerminalEngine {
@@ -162,6 +175,8 @@ impl TerminalEngine {
             parser: Processor::new(),
             events,
             palette,
+            search: None,
+            current_match: None,
         }
     }
 
@@ -214,6 +229,94 @@ impl TerminalEngine {
 
     pub fn selection_text(&self) -> Option<String> {
         self.term.selection_to_string()
+    }
+
+    pub fn search_set(&mut self, pattern: String) -> bool {
+        match RegexSearch::new(&pattern) {
+            Ok(re) => {
+                self.search = Some(re);
+                self.current_match = None;
+                self.search_step(Direction::Right);
+                true
+            }
+            Err(_) => {
+                self.search = None;
+                self.current_match = None;
+                false
+            }
+        }
+    }
+
+    pub fn search_next(&mut self) -> bool {
+        self.search_step(Direction::Right)
+    }
+
+    pub fn search_prev(&mut self) -> bool {
+        self.search_step(Direction::Left)
+    }
+
+    pub fn search_clear(&mut self) {
+        self.search = None;
+        self.current_match = None;
+    }
+
+    fn search_step(&mut self, direction: Direction) -> bool {
+        if self.search.is_none() {
+            return false;
+        }
+        let off = self.term.grid().display_offset();
+        let rows = self.term.screen_lines();
+        let cols = self.term.columns();
+        // Origin: just past the current match in the search direction; else the
+        // appropriate viewport corner.
+        let origin = match (&self.current_match, direction) {
+            (Some(m), Direction::Right) => *m.end(),
+            (Some(m), Direction::Left) => *m.start(),
+            (None, Direction::Right) => viewport_to_point(off, Point::new(0, Column(0))),
+            (None, Direction::Left) => {
+                viewport_to_point(off, Point::new(rows - 1, Column(cols - 1)))
+            }
+        };
+        let re = self.search.as_mut().unwrap();
+        let found = self.term.search_next(re, origin, direction, Side::Left, None);
+        match found {
+            Some(m) => {
+                self.term.scroll_to_point(*m.start());
+                self.current_match = Some(m);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn full_snapshot_searched(&mut self) -> RenderUpdate {
+        let mut update = self.full_snapshot();
+        if self.search.is_none() {
+            return update;
+        }
+        let off = self.term.grid().display_offset();
+        let rows = self.term.screen_lines();
+        let cols = self.term.columns();
+        let current = self.current_match.clone();
+        let top = viewport_to_point(off, Point::new(0, Column(0)));
+        let bottom = viewport_to_point(off, Point::new(rows - 1, Column(cols - 1)));
+        let re = self.search.as_mut().unwrap();
+        let matches: Vec<Match> =
+            RegexIter::new(top, bottom, Direction::Right, &self.term, re).collect();
+        for line in update.lines.iter_mut() {
+            for col in 0..line.cells.len() {
+                let p = viewport_to_point(off, Point::new(line.line as usize, Column(col)));
+                if matches.iter().any(|m| point_in_match(p, m)) {
+                    line.cells[col].flags |= FLAG_MATCH;
+                }
+                if let Some(m) = &current {
+                    if point_in_match(p, m) {
+                        line.cells[col].flags |= FLAG_MATCH_CURRENT;
+                    }
+                }
+            }
+        }
+        update
     }
 
     /// Cells of a single viewport row.
@@ -664,5 +767,48 @@ mod tests {
         e.scroll_lines(1000);
         let u = e.full_snapshot();
         assert!(u.display_offset <= 50, "offset {} exceeds history 50", u.display_offset);
+    }
+
+    #[test]
+    fn search_set_marks_matches_and_focuses_first() {
+        let mut e = engine(20, 5);
+        e.advance(b"foo bar foo".to_vec());
+        assert!(e.search_set("foo".to_string()));
+        let u = e.full_snapshot_searched();
+        assert_ne!(u.lines[0].cells[0].flags & FLAG_MATCH, 0);
+        assert_ne!(u.lines[0].cells[0].flags & FLAG_MATCH_CURRENT, 0);
+        assert_ne!(u.lines[0].cells[8].flags & FLAG_MATCH, 0);
+        assert_eq!(u.lines[0].cells[8].flags & FLAG_MATCH_CURRENT, 0);
+        assert_eq!(u.lines[0].cells[3].flags & (FLAG_MATCH | FLAG_MATCH_CURRENT), 0);
+    }
+
+    #[test]
+    fn search_next_moves_focus_to_the_second_match() {
+        let mut e = engine(20, 5);
+        e.advance(b"foo bar foo".to_vec());
+        e.search_set("foo".to_string());
+        assert!(e.search_next());
+        let u = e.full_snapshot_searched();
+        assert_ne!(u.lines[0].cells[8].flags & FLAG_MATCH_CURRENT, 0);
+        assert_eq!(u.lines[0].cells[0].flags & FLAG_MATCH_CURRENT, 0);
+    }
+
+    #[test]
+    fn invalid_regex_returns_false_and_highlights_nothing() {
+        let mut e = engine(20, 5);
+        e.advance(b"foo".to_vec());
+        assert!(!e.search_set("(".to_string()));
+        let u = e.full_snapshot_searched();
+        assert_eq!(u.lines[0].cells[0].flags & FLAG_MATCH, 0);
+    }
+
+    #[test]
+    fn search_clear_removes_highlight() {
+        let mut e = engine(20, 5);
+        e.advance(b"foo".to_vec());
+        e.search_set("foo".to_string());
+        e.search_clear();
+        let u = e.full_snapshot_searched();
+        assert_eq!(u.lines[0].cells[0].flags & FLAG_MATCH, 0);
     }
 }
