@@ -63,6 +63,47 @@ Defaults match alacritty; missing sections keep 2F per-field fallback.
 - **Fling tuning:** Decay `0.92`, velocity thresholds `200` / `40` px/s — tune on a real touch panel if inertia feels off.
 - **Gesture arena:** Long-press vs vertical drag split into separate widget tests; combined drag-then-long-press on one pointer is flaky in tests (production paths are separate gestures).
 
+## Post-review user-testing fixes (2026-05-28)
+
+Four user-reported regressions surfaced once real-machine testing began. All
+were Dart-side: Rust + FFI both proven correct via a new real-native
+integration test (`search next/prev across the FFI boundary actually moves
+focus`) and a Rust unit test for the failing scenario (`foofoofoo` three
+matches one line).
+
+- **Code review:** `5b28f5d` removes a dead `flutter/scheduler.dart` import,
+  unblocks Ctrl+Shift+F toggle-close (the previous `_searchOpen` early-return
+  shadowed the toggle branch), and replaces a smoke painter test with 4
+  behavioural cases on `applySearchOverride`.
+- **Search prev/next origin:** `8c7dbea` — origin was sitting AT
+  `m.start()` / `m.end()`, so `search_next` could re-find the current match
+  ("感觉不到"). Mirror alacritty's `advance_search_origin`:
+  `m.end().add(&term, Boundary::None, 1)` / `m.start().sub(...)`.
+- **Trackpad two-finger pan:** `51941dd` — Flutter delivers precision-trackpad
+  pan as `PointerPanZoom*` events (`PointerDeviceKind.trackpad`), missed by
+  both `onPointerSignal` and the mouse `Listener` (kind-guarded). Added
+  `Listener.onPointerPanZoomStart/Update`, routed through `_touchScrollBy` for
+  alt-screen-arrows / app-mouse / scrollLines.
+- **TextField was eating Shift+Enter; `_searchActive` flag desync:** `c543b95`
+  — TextField consumed Shift+Enter at the text-input pipeline before
+  `Focus(onKeyEvent:)` saw it; moved to `FocusNode(onKeyEvent: ...)` (set
+  directly on the FocusNode, fires before TextField). Removed redundant
+  `onSubmitted` to dedupe Enter. Removed the `_searchActive` boolean in
+  `TerminalEngineClient` (the Rust `full_snapshot_searched` already short-
+  circuits on `search.is_none()`); always use the searched snapshot to remove
+  a class of flag-desync bugs.
+- **First-open lag (~2 s) on Linux:** `6f0b9d5` — Material icon/font load +
+  TextField/IconButton widget construction at first Ctrl+Shift+F was the
+  dominant cost. Keep the bar mounted from app start under
+  `Offstage(offstage: !_searchOpen)`; bar gains a `visible` prop;
+  `didUpdateWidget` manages focus + clears the pattern on close (matches
+  alacritty's close-clears-pattern). Test asserts via `bar().visible`
+  (`find.byType` defaults to `skipOffstage: true`).
+- **Build pitfall reminder:** `flutter test` does NOT rebuild the Rust dylib.
+  After any Rust/FRB change rebuild with `flutter build linux --debug` before
+  `flutter test`; in `flutter run`, fully restart (not hot-reload) for
+  late/initState changes.
+
 ## Commits (feature branch)
 
 | SHA | Message |
@@ -74,3 +115,10 @@ Defaults match alacritty; missing sections keep 2F per-field fallback.
 | `a286855` | feat(ui): search bar + Ctrl+Shift+F wiring |
 | `2784bbc` | feat(render): box-drawing long-tail — mixed junctions + dashed lines |
 | `6463cf4` | feat(ui): touch input — one-finger scroll + long-press select |
+| `ef2aeb8` | docs: sample search colors + Plan 2G/2J/2H acceptance findings |
+| `c53f4e8` | fix(search): preserve highlights on selection + invalid-regex UI |
+| `5b28f5d` | fix(search): Ctrl+Shift+F can toggle close + tighten review nits |
+| `8c7dbea` | fix(search): step origin past match boundary so prev/next actually move |
+| `51941dd` | feat(input): precision trackpad two-finger pan = scroll |
+| `c543b95` | fix(search): TextField was eating Shift+Enter; flag desync masked highlights |
+| `6f0b9d5` | perf(search): keep bar mounted under Offstage to skip first-open lag |
