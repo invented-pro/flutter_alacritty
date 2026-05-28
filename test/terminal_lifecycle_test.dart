@@ -435,4 +435,71 @@ void main() {
     expect(cellH(), h0);
     title.dispose();
   });
+
+  testWidgets('plain right-click opens context menu with Copy/Paste/Search',
+      (tester) async {
+    final title = ValueNotifier<String>('t');
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalScreen(
+        title: title,
+        ptyFactory: ({required rows, required columns}) => _FakePty(),
+        engineFactory: ({
+          required columns,
+          required rows,
+          required onPtyWrite,
+          required onTitle,
+          required onBell,
+          required onClipboard,
+          required engineConfig,
+        }) => _FakeBinding(),
+      ),
+    ));
+    await tester.pump();
+    final center = tester.getCenter(find.byType(CustomPaint).first);
+    final g = await tester.startGesture(
+      center,
+      buttons: kSecondaryMouseButton,
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(find.text('Copy'), findsOneWidget);
+    expect(find.text('Paste'), findsOneWidget);
+    expect(find.text('Search…'), findsOneWidget);
+    title.dispose();
+  });
+
+  testWidgets('Shift+right-click bypasses the menu (forwards to program)',
+      (tester) async {
+    final title = ValueNotifier<String>('t');
+    final binding = _FakeBinding();
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalScreen(
+        title: title,
+        ptyFactory: ({required rows, required columns}) => _FakePty(),
+        engineFactory: ({
+          required columns,
+          required rows,
+          required onPtyWrite,
+          required onTitle,
+          required onBell,
+          required onClipboard,
+          required engineConfig,
+        }) => binding,
+      ),
+    ));
+    await tester.pump();
+    final center = tester.getCenter(find.byType(CustomPaint).first);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    final g = await tester.startGesture(
+      center,
+      buttons: kSecondaryMouseButton,
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.up();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    expect(find.text('Copy'), findsNothing);
+    title.dispose();
+  });
 }

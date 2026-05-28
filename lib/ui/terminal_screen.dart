@@ -342,6 +342,60 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _pty!.write(pasteBytes(text, modeFlags: _grid.modeFlags));
   }
 
+  Future<void> _showContextMenu(Offset local, Offset global) async {
+    final (r, c, _) = _cellAt(local);
+    final selText = _client?.binding.selectionText() ?? '';
+    String? hyperUri;
+    if (_client != null &&
+        _grid.rows > r &&
+        _grid.columns > c &&
+        isHyperlink(_grid.flagsAt(r, c))) {
+      hyperUri = _client!.resolveHyperlink(_grid.hyperlinkIdAt(r, c));
+    }
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final size = overlay?.size ?? MediaQuery.of(context).size;
+    await showMenu<void>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        global.dx,
+        global.dy,
+        size.width - global.dx,
+        size.height - global.dy,
+      ),
+      items: [
+        PopupMenuItem(
+          enabled: selText.isNotEmpty,
+          child: const Text('Copy'),
+          onTap: () {
+            if (selText.isNotEmpty) {
+              Clipboard.setData(ClipboardData(text: selText));
+            }
+          },
+        ),
+        PopupMenuItem(child: const Text('Paste'), onTap: _paste),
+        if (hyperUri != null) ...[
+          PopupMenuItem(
+            child: const Text('Open Hyperlink'),
+            onTap: () {
+              _launch(hyperUri!);
+            },
+          ),
+          PopupMenuItem(
+            child: const Text('Copy Hyperlink Address'),
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: hyperUri!));
+            },
+          ),
+        ],
+        PopupMenuItem(
+          child: const Text('Search…'),
+          onTap: () => setState(() => _searchOpen = true),
+        ),
+      ],
+    );
+  }
+
   Future<void> _onDrop(DropDoneDetails details) async {
     final paths = details.files.map((f) => f.path).where((p) => p.isNotEmpty);
     if (paths.isEmpty) return;
@@ -508,6 +562,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     e.buttons & kMiddleMouseButton != 0 &&
                     _primary.isNotEmpty) {
                   _pty?.write(pasteBytes(_primary, modeFlags: _grid.modeFlags));
+                  return;
+                }
+                if (e.buttons & kSecondaryButton != 0 &&
+                    !HardwareKeyboard.instance.isShiftPressed) {
+                  _showContextMenu(e.localPosition, e.position);
                   return;
                 }
                 _pressedButton = _btn(e.buttons);
