@@ -53,3 +53,12 @@ multiplier = 3         # lines per wheel notch
 
 [mouse]
 double_click_threshold = 300   # ms
+
+[colors.hints.start]
+background = "#f4bf75"   # auto-detected URL / OSC 8 hyperlink highlight
+foreground = "#181818"
+
+[bell]
+color = "#ffffff"   # visual-bell flash color
+duration = 0        # ms; 0 = disabled (audio only)
+animation = "linear"  # currently the only rendered curve (accepted for forward-compat)
