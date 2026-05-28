@@ -37,6 +37,19 @@ Rect cursorRect(int shape, double cellWidth, double cellHeight, double lineWidth
   }
 }
 
+class SearchColors {
+  const SearchColors({
+    required this.matchBg,
+    required this.matchFg,
+    required this.focusedBg,
+    required this.focusedFg,
+  });
+  final int matchBg;
+  final int matchFg;
+  final int focusedBg;
+  final int focusedFg;
+}
+
 class TerminalPainter extends CustomPainter {
   TerminalPainter({
     required this.grid,
@@ -45,6 +58,7 @@ class TerminalPainter extends CustomPainter {
     required this.cellHeight,
     required this.blinkOn,
     required this.selectionColor,
+    required this.searchColors,
   })  : _paintGeneration = grid.generation,
         super(repaint: Listenable.merge([grid, blinkOn]));
 
@@ -54,7 +68,18 @@ class TerminalPainter extends CustomPainter {
   final double cellHeight;
   final ValueListenable<bool> blinkOn;
   final int selectionColor;
+  final SearchColors searchColors;
   final int _paintGeneration;
+
+  ({int fg, int bg}) _withSearch(int flags, ({int fg, int bg}) ec) {
+    if (flags & kFlagMatchCurrent != 0) {
+      return (fg: searchColors.focusedFg, bg: searchColors.focusedBg);
+    }
+    if (flags & kFlagMatch != 0) {
+      return (fg: searchColors.matchFg, bg: searchColors.matchBg);
+    }
+    return ec;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -67,10 +92,14 @@ class TerminalPainter extends CustomPainter {
     for (var row = 0; row < rows; row++) {
       final y = row * cellHeight;
       for (var col = 0; col < cols; col++) {
-        final ec = effectiveColors(
-          grid.flagsAt(row, col),
-          grid.fgAt(row, col),
-          grid.bgAt(row, col),
+        final flags = grid.flagsAt(row, col);
+        final ec = _withSearch(
+          flags,
+          effectiveColors(
+            flags,
+            grid.fgAt(row, col),
+            grid.bgAt(row, col),
+          ),
         );
         bgPaint.color = Color(0xFF000000 | ec.bg);
         canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
@@ -93,7 +122,10 @@ class TerminalPainter extends CustomPainter {
         if (flags & kFlagWideSpacer != 0) continue; // covered by the wide glyph at col-1
         final cp = grid.codepointAt(row, col);
         if (cp == 32 || cp == 0) continue;
-        final ec = effectiveColors(flags, grid.fgAt(row, col), grid.bgAt(row, col));
+        final ec = _withSearch(
+          flags,
+          effectiveColors(flags, grid.fgAt(row, col), grid.bgAt(row, col)),
+        );
         final fg = Color(0xFF000000 | ec.fg);
         final cellRect = Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight);
         if (isBoxDrawing(cp) && paintBoxGlyph(canvas, cellRect, cp, fg, lineWidth)) {

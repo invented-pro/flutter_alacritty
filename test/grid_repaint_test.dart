@@ -17,6 +17,7 @@ class _CountingTerminalPainter extends TerminalPainter {
     required super.cellHeight,
     required super.blinkOn,
     required super.selectionColor,
+    required super.searchColors,
   });
 
   @override
@@ -52,6 +53,12 @@ void main() {
             cellHeight: 16,
             blinkOn: blinkOn,
             selectionColor: 0x553A6EA5,
+            searchColors: const SearchColors(
+              matchBg: 0xAC4242,
+              matchFg: 0x181818,
+              focusedBg: 0xF4BF75,
+              focusedFg: 0x181818,
+            ),
           ),
         ),
       ),

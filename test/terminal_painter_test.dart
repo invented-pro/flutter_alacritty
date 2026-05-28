@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +16,7 @@ class _RecordingGlyphCache extends GlyphCache {
       : super(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
   final List<(int, bool)> calls = [];
   @override
-  ui.Paragraph? tryGet(int codepoint, int fg,
+  Paragraph? tryGet(int codepoint, int fg,
       {bool bold = false, bool italic = false, bool wide = false}) {
     calls.add((codepoint, wide));
     return super.tryGet(codepoint, fg, bold: bold, italic: italic, wide: wide);
@@ -69,7 +69,13 @@ void main() {
             cellWidth: 8,
             cellHeight: 16,
             blinkOn: _steadyBlink,
-            selectionColor: 0x553A6EA5),
+            selectionColor: 0x553A6EA5,
+            searchColors: const SearchColors(
+              matchBg: 0xAC4242,
+              matchFg: 0x181818,
+              focusedBg: 0xF4BF75,
+              focusedFg: 0x181818,
+            )),
       ),
     ));
     await tester.pump();
@@ -96,5 +102,35 @@ void main() {
     ));
     expect(isSelected(grid.flagsAt(0, 0)), isTrue);
     expect(isSelected(grid.flagsAt(0, 1)), isFalse);
+  });
+
+  test('current-match cell paints the focused search background', () {
+    final grid = MirrorGrid()
+      ..apply(GridUpdate(
+        full: true, rows: 1, columns: 1,
+        lines: [
+          LineCells(
+            line: 0,
+            codepoints: Int32List.fromList([0x41]), // 'A'
+            fg: Int32List.fromList([0xD8D8D8]),
+            bg: Int32List.fromList([0x181818]),
+            flags: Uint16List.fromList([kFlagMatch | kFlagMatchCurrent]),
+          )
+        ],
+        cursorRow: 0, cursorCol: 0, cursorVisible: false,
+      ));
+    final rec = PictureRecorder();
+    final canvas = Canvas(rec);
+    TerminalPainter(
+      grid: grid,
+      glyphs: GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8),
+      cellWidth: 8,
+      cellHeight: 16,
+      blinkOn: ValueNotifier(true),
+      selectionColor: 0x553A6EA5,
+      searchColors: const SearchColors(
+        matchBg: 0xAC4242, matchFg: 0x181818, focusedBg: 0xF4BF75, focusedFg: 0x181818),
+    ).paint(canvas, const Size(8, 16));
+    expect(rec.endRecording(), isNotNull);
   });
 }

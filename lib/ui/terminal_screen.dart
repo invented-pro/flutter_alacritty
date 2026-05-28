@@ -390,6 +390,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       cellHeight: _metrics.height,
                       blinkOn: _blinkOn,
                       selectionColor: _config.selectionOverlay,
+                      searchColors: SearchColors(
+                        matchBg: _config.colors.searchMatchBg,
+                        matchFg: _config.colors.searchMatchFg,
+                        focusedBg: _config.colors.searchFocusedBg,
+                        focusedFg: _config.colors.searchFocusedFg,
+                      ),
                     ),
                   ),
                   if (_status != TermStatus.running)
