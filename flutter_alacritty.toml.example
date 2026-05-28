@@ -62,3 +62,8 @@ foreground = "#181818"
 color = "#ffffff"   # visual-bell flash color
 duration = 0        # ms; 0 = disabled (audio only)
 animation = "linear"  # currently the only rendered curve (accepted for forward-compat)
+
+[ime]
+preedit_bg = "#282828"      # background of the floating preedit chip
+preedit_fg = "#d8d8d8"      # text color
+underline = true            # underline the composing text (alacritty convention)
