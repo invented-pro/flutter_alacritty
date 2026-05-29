@@ -284,7 +284,15 @@ bool paintBoxGlyph(Canvas canvas, Rect cell, int cp, Color fg, double lineWidth)
     ..color = fg
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.butt;
-  final fill = Paint()..style = PaintingStyle.fill;
+  // Block-element fills (RectOp) must not be anti-aliased: cell metrics are
+  // sub-pixel, so AA'd edges on adjacent block cells leave half-covered seams —
+  // a faint grid between cells (worst on fractional DPR / widget offset). Solid
+  // pixel-aligned fills tile exactly, matching alacritty's integer-pixel
+  // `draw_rect` (builtin_font.rs). Strokes/arcs keep AA for smooth diagonals
+  // (alacritty likewise only anti-aliases its Xiaolin-Wu line drawing).
+  final fill = Paint()
+    ..style = PaintingStyle.fill
+    ..isAntiAlias = false;
   for (final op in ops) {
     switch (op) {
       case LineOp(:final a, :final b, :final width):
