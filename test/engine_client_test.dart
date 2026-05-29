@@ -57,6 +57,10 @@ class _SearchFake implements EngineBinding {
   @override
   void clearHistory() {}
   @override
+  void respondClipboardLoad(String text) {}
+  @override
+  void setCellPixels(int width, int height) {}
+  @override
   void selectionStart(int r, int c, bool rh, int k) {}
   @override
   void selectionUpdate(int r, int c, bool rh) {}
@@ -114,6 +118,10 @@ class _FakeBinding implements EngineBinding {
   Future<void> scrollToBottom() async {}
   @override
   void clearHistory() {}
+  @override
+  void respondClipboardLoad(String text) {}
+  @override
+  void setCellPixels(int width, int height) {}
   @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) {}
   @override

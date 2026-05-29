@@ -112,6 +112,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   StreamSubscription<Uint8List>? _outputSub;
   StreamSubscription<Uint8List>? _engineOutputSub;
   StreamSubscription<String>? _clipSub;
+  StreamSubscription<void>? _clipLoadSub;
   int _cols = 0, _rows = 0;
   TermStatus _status = TermStatus.running;
   int? _exitCode;
@@ -170,6 +171,10 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
       engine.title.addListener(_syncTitle);
       _clipSub = engine.clipboardStore
           .listen((t) => Clipboard.setData(ClipboardData(text: t)));
+      _clipLoadSub = engine.clipboardLoad.listen((_) async {
+        final data = await Clipboard.getData('text/plain');
+        _engine?.respondClipboardLoad(data?.text ?? '');
+      });
       _engineOutputSub = engine.output.listen(pty.write);
       engine.resize(columns: cols, rows: rows);
       engine.initializeEmpty(rows, cols);
@@ -201,6 +206,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
     _outputSub?.cancel();
     _engineOutputSub?.cancel();
     _clipSub?.cancel();
+    _clipLoadSub?.cancel();
     _pty?.kill();
     _engine?.title.removeListener(_syncTitle);
     _controller.dispose();
@@ -209,6 +215,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
     _outputSub = null;
     _engineOutputSub = null;
     _clipSub = null;
+    _clipLoadSub = null;
     _pty = null;
     _engine = null;
     _exitCode = null;
@@ -326,6 +333,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
     _outputSub?.cancel();
     _engineOutputSub?.cancel();
     _clipSub?.cancel();
+    _clipLoadSub?.cancel();
     _pty?.kill();
     _engine?.title.removeListener(_syncTitle);
     _controller.dispose();

@@ -27,6 +27,7 @@ typedef EngineFactory = EngineBinding Function({
   required void Function(String) onTitle,
   required void Function() onBell,
   required void Function(String) onClipboard,
+  required void Function() onClipboardLoad,
   required EngineConfig engineConfig,
 });
 
@@ -81,6 +82,8 @@ class TerminalEngine {
   final StreamController<void> _bellCtl = StreamController<void>.broadcast();
   final StreamController<String> _clipboardCtl =
       StreamController<String>.broadcast();
+  final StreamController<void> _clipboardLoadCtl =
+      StreamController<void>.broadcast();
   final ValueNotifier<String> _title = ValueNotifier<String>('flutter_alacritty');
 
   TerminalEngineClient? _client;
@@ -96,6 +99,10 @@ class TerminalEngine {
 
   /// One event per OSC 52 SET.
   Stream<String> get clipboardStore => _clipboardCtl.stream;
+
+  /// One event per OSC 52 paste request (host should read clipboard and call
+  /// [respondClipboardLoad]).
+  Stream<void> get clipboardLoad => _clipboardLoadCtl.stream;
 
   /// Current terminal title. Updated on `Event::Title` and `Event::ResetTitle`.
   ValueListenable<String> get title => _title;
@@ -186,6 +193,20 @@ class TerminalEngine {
   /// Clear scrollback history (alacritty ClearHistory). No-op until bound.
   void clearHistory() => _client?.clearHistory();
 
+  /// Answer a pending OSC 52 paste request with [text] (host reads the system
+  /// clipboard, then calls this). Encoded reply goes out on [output].
+  void respondClipboardLoad(String text) {
+    _ensureBound();
+    _binding!.respondClipboardLoad(text);
+    _client!.pumpEventsNow();
+  }
+
+  /// Push the measured cell pixel size so the engine can answer CSI 14/18 t.
+  void setCellPixels(int width, int height) {
+    _ensureBound();
+    _binding!.setCellPixels(width, height);
+  }
+
   /// Force a viewport refresh from the engine (used after selection changes,
   /// which alter FLAG_SELECTED on otherwise-unchanged cells).
   void refreshView() => _client?.refreshView();
@@ -205,6 +226,7 @@ class TerminalEngine {
     _outputCtl.close();
     _bellCtl.close();
     _clipboardCtl.close();
+    _clipboardLoadCtl.close();
   }
 
   // ---- internals -----------------------------------------------------------
@@ -225,6 +247,7 @@ class TerminalEngine {
       onTitle: _onTitle,
       onBell: _onBell,
       onClipboard: _onClipboard,
+      onClipboardLoad: _onClipboardLoad,
       engineConfig: _config.engineConfig,
     );
     _bindEager(binding);
@@ -255,6 +278,7 @@ class TerminalEngine {
       binding.onTitle = _onTitle;
       binding.onBell = _onBell;
       binding.onClipboard = _onClipboard;
+      binding.onClipboardLoad = _onClipboardLoad;
     }
   }
 
@@ -276,5 +300,10 @@ class TerminalEngine {
   void _onClipboard(String text) {
     if (_disposed || _clipboardCtl.isClosed) return;
     _clipboardCtl.add(text);
+  }
+
+  void _onClipboardLoad() {
+    if (_disposed || _clipboardLoadCtl.isClosed) return;
+    _clipboardLoadCtl.add(null);
   }
 }

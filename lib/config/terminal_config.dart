@@ -485,6 +485,10 @@ class TerminalConfig {
         palette: Uint32List.fromList(
             [...colors.ansi, colors.foreground, colors.background]),
         scrollback: scrolling.history,
+        osc52: osc52ToWire(terminal.osc52),
+        semanticEscapeChars: selection.semanticEscapeChars,
+        defaultCursorShape: cursor.defaultShape,
+        defaultCursorBlinking: cursor.defaultBlinking,
       );
 
   /// Parse an alacritty-style TOML document. Unknown keys are ignored; any

@@ -208,6 +208,7 @@ class TerminalViewState extends State<TerminalView>
     _fontSize = widget.textStyle.size;
     _style = widget.textStyle.toTextStyle().copyWith(fontSize: _fontSize);
     _metrics = CellMetrics.measure(_style);
+    widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
     _glyphs = GlyphCache(
       fontFamily: widget.textStyle.family,
       fontFamilyFallback: widget.textStyle.fallback,
@@ -307,6 +308,7 @@ class TerminalViewState extends State<TerminalView>
       _glyphs.dispose();
       _style = widget.textStyle.toTextStyle().copyWith(fontSize: _fontSize);
       _metrics = CellMetrics.measure(_style);
+      widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
       _glyphs = GlyphCache(
         fontFamily: widget.textStyle.family,
         fontFamilyFallback: widget.textStyle.fallback,
@@ -451,7 +453,14 @@ class TerminalViewState extends State<TerminalView>
     final hyper = _grid.rows > r &&
         _grid.columns > c &&
         isHyperlink(_grid.flagsAt(r, c));
-    final next = hyper ? SystemMouseCursors.click : widget.mouseCursor;
+    final MouseCursor next;
+    if (hyper) {
+      next = SystemMouseCursors.click;
+    } else if (anyMouse(_grid.modeFlags)) {
+      next = SystemMouseCursors.basic;
+    } else {
+      next = widget.mouseCursor;
+    }
     if (next != _hoverCursor) setState(() => _hoverCursor = next);
   }
 

@@ -129,3 +129,21 @@ RenderUpdate engineFullSnapshotSearched({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineFullSnapshotSearched(
       engine: engine,
     );
+
+void engineRespondClipboardLoad({
+  required TerminalEngine engine,
+  required String text,
+}) => RustLib.instance.api.crateApiTerminalEngineRespondClipboardLoad(
+  engine: engine,
+  text: text,
+);
+
+void engineSetCellPixels({
+  required TerminalEngine engine,
+  required int width,
+  required int height,
+}) => RustLib.instance.api.crateApiTerminalEngineSetCellPixels(
+  engine: engine,
+  width: width,
+  height: height,
+);

@@ -50,6 +50,10 @@ class _CountingFakeBinding implements EngineBinding {
   @override
   void clearHistory() {}
   @override
+  void respondClipboardLoad(String text) {}
+  @override
+  void setCellPixels(int width, int height) {}
+  @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) {}
   @override
   void selectionUpdate(int displayRow, int col, bool rightHalf) {}

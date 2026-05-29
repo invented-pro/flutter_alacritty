@@ -96,6 +96,20 @@ class FakeBinding implements RewireableEngineBinding {
   void Function(String)? onTitle;
   void Function()? onBell;
   void Function(String)? onClipboard;
+  void Function()? onClipboardLoad;
+
+  String? lastClipboardLoadText;
+  int? lastCellWidth;
+  int? lastCellHeight;
+
+  @override
+  void respondClipboardLoad(String text) => lastClipboardLoadText = text;
+
+  @override
+  void setCellPixels(int width, int height) {
+    lastCellWidth = width;
+    lastCellHeight = height;
+  }
 
   @override
   Future<void> advance(Uint8List bytes) async {}
@@ -122,6 +136,8 @@ class FakeBinding implements RewireableEngineBinding {
           onBell?.call();
         case 'clipboard':
           onClipboard?.call(payload as String);
+        case 'clipboard_load':
+          onClipboardLoad?.call();
         default:
           throw StateError(
               'FakeBinding.pumpEvents: unknown event kind: $kind');
