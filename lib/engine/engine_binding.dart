@@ -24,6 +24,7 @@ abstract class EngineBinding {
   Future<void> scrollLines(int delta);
   Future<void> scrollToBottom();
   void clearHistory();
+  void reconfigure(EngineConfig config);
   void respondClipboardLoad(String text);
   void setCellPixels(int width, int height);
   void selectionStart(int displayRow, int col, bool rightHalf, int kind);
@@ -129,6 +130,10 @@ class FrbEngineBinding implements EngineBinding {
 
   @override
   void clearHistory() => engineClearHistory(engine: _engine);
+
+  @override
+  void reconfigure(EngineConfig config) =>
+      engineReconfigure(engine: _engine, config: config);
 
   @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) =>

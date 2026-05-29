@@ -211,6 +211,14 @@ class TerminalEngine {
   /// which alter FLAG_SELECTED on otherwise-unchanged cells).
   void refreshView() => _client?.refreshView();
 
+  /// Live-apply engine-side config (scrollback, palette, semantic chars,
+  /// cursor defaults, osc52) without re-spawning. Safe to call repeatedly.
+  void reconfigure(TerminalConfig config) {
+    _ensureBound();
+    _binding!.reconfigure(config.engineConfig);
+    _client!.refreshView();
+  }
+
   /// Initialize the mirror grid to an empty viewport. Useful at startup so the
   /// first paint pass doesn't show a stale grid before the first damage
   /// arrives. The mirror is then resized on the first `apply`.

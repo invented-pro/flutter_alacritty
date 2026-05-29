@@ -69,6 +69,7 @@ class ExampleTerminalApp extends StatefulWidget {
     this.ptyFactory,
     this.engineFactory,
     this.config,
+    this.configUpdates,
     this.launchUrl,
     super.key,
   });
@@ -80,6 +81,7 @@ class ExampleTerminalApp extends StatefulWidget {
   final PtyFactory? ptyFactory;
   final EngineFactory? engineFactory;
   final TerminalConfig? config;
+  final Stream<TerminalConfig>? configUpdates;
   final UrlLauncher? launchUrl;
 
   @override
@@ -100,6 +102,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   // and the nested TerminalView agree on sizing (both derive from the same
   // measured style).
   late CellMetrics _metrics = _measureMetrics(_config);
+  StreamSubscription<TerminalConfig>? _cfgSub;
 
   TerminalEngine? _engine;
   TerminalController _controller = TerminalController();
@@ -123,6 +126,29 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
 
   CellMetrics _measureMetrics(TerminalConfig config) => CellMetrics.measure(
       config.textStyle.copyWith(fontSize: config.font.size));
+
+  @override
+  void initState() {
+    super.initState();
+    _cfgSub = widget.configUpdates?.listen(_applyConfig);
+  }
+
+  void _applyConfig(TerminalConfig next) {
+    final prev = _config;
+    setState(() {
+      _config = next;
+      _binds = bindingsToShortcuts(next.keyboard.bindings);
+      if (next.font.family != prev.font.family ||
+          next.font.size != prev.font.size ||
+          next.font.lineHeight != prev.font.lineHeight) {
+        _metrics = _measureMetrics(next);
+      }
+    });
+    _engine?.reconfigure(next);
+    if (next.shell.program != prev.shell.program) {
+      debugPrint('flutter_alacritty: [shell] change applies on restart');
+    }
+  }
 
   /// Mirror engine.title → host-visible notifier.
   void _syncTitle() {
@@ -332,6 +358,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
 
   @override
   void dispose() {
+    _cfgSub?.cancel();
     _outputSub?.cancel();
     _engineOutputSub?.cancel();
     _clipSub?.cancel();

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_alacritty/engine/engine_binding.dart';
 import 'package:flutter_alacritty/render/cell_flags.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
+import 'package:flutter_alacritty/src/rust/engine.dart';
 
 /// Shared fake [EngineBinding] used by widget/integration-style tests that
 /// drive `ExampleTerminalApp` / `TerminalEngine` without the native engine.
@@ -162,6 +163,8 @@ class FakeBinding implements RewireableEngineBinding {
   }
   @override
   void clearHistory() {}
+  @override
+  void reconfigure(EngineConfig config) {}
   @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) {
     selStartCalls++;

@@ -147,3 +147,11 @@ void engineSetCellPixels({
   width: width,
   height: height,
 );
+
+void engineReconfigure({
+  required TerminalEngine engine,
+  required EngineConfig config,
+}) => RustLib.instance.api.crateApiTerminalEngineReconfigure(
+  engine: engine,
+  config: config,
+);
