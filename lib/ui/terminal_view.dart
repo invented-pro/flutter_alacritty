@@ -521,8 +521,16 @@ class TerminalViewState extends State<TerminalView>
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cols = (constraints.maxWidth / _metrics.width).floor().clamp(1, 1000);
-        final rows = (constraints.maxHeight / _metrics.height).floor().clamp(1, 1000);
+        // Cell grid must match the padded paint area — otherwise PTY/cols are
+        // sized to the outer box while CustomPaint is inset and right columns
+        // (e.g. box-drawing borders) are clipped.
+        final pad = widget.padding ?? EdgeInsets.zero;
+        final availW =
+            (constraints.maxWidth - pad.horizontal).clamp(0.0, double.infinity);
+        final availH =
+            (constraints.maxHeight - pad.vertical).clamp(0.0, double.infinity);
+        final cols = (availW / _metrics.width).floor().clamp(1, 1000);
+        final rows = (availH / _metrics.height).floor().clamp(1, 1000);
         _ensureSizing(cols, rows);
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _reportCaretRectToIme());
