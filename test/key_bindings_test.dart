@@ -65,4 +65,33 @@ void main() {
             control: true, shift: true)],
         isA<CopyIntent>());
   });
+
+  test('disable idiom (None) removes a default chord', () {
+    // Default Ctrl+Shift+C is Copy.
+    const chord =
+        SingleActivator(LogicalKeyboardKey.keyC, control: true, shift: true);
+    expect(defaultTerminalShortcuts.containsKey(chord), true);
+    final (shortcuts, _) = bindingsToShortcuts([
+      const RawKeyBinding(key: 'C', mods: 'Control|Shift', action: 'None'),
+    ]);
+    // No SingleActivator semantically equal to Ctrl+Shift+C remains, and no
+    // DisableBindingIntent was installed.
+    final remaining = shortcuts.entries.where((e) =>
+        e.key is SingleActivator &&
+        (e.key as SingleActivator).trigger == LogicalKeyboardKey.keyC &&
+        (e.key as SingleActivator).control &&
+        (e.key as SingleActivator).shift);
+    expect(remaining, isEmpty);
+    expect(shortcuts.values.whereType<DisableBindingIntent>(), isEmpty);
+  });
+
+  test('ReceiveChar also disables', () {
+    final (shortcuts, _) = bindingsToShortcuts([
+      const RawKeyBinding(key: 'F', mods: 'Control|Shift', action: 'ReceiveChar'),
+    ]);
+    expect(
+        shortcuts[const SingleActivator(LogicalKeyboardKey.keyF,
+            control: true, shift: true)],
+        isNull);
+  });
 }

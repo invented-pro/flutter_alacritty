@@ -14,6 +14,15 @@ class KeyBinding {
   final String mode;
 }
 
+/// Sentinel intent for alacritty's disable idiom (`action = "None"` /
+/// "ReceiveChar"): a binding carrying this removes the matching chord from the
+/// shortcuts map (including a default) rather than installing an action.
+/// Exposed (not private) so callers can recognise it, but it is never wired to
+/// an Action — [bindingsToShortcuts] drops it after removal.
+class DisableBindingIntent extends Intent {
+  const DisableBindingIntent();
+}
+
 /// alacritty key-name → LogicalKeyboardKey. Single uppercase letters and
 /// digits map directly; named keys use alacritty's spelling.
 LogicalKeyboardKey? _logicalForKeyName(String name) {
@@ -87,8 +96,9 @@ LogicalKeyboardKey? _logicalForKeyName(String name) {
   return (control: control, shift: shift, alt: alt, meta: meta);
 }
 
-/// alacritty Action name → Intent. Returns null only for the disable idioms
-/// ("None"/"ReceiveChar"), which remove a binding.
+/// alacritty Action name → Intent. The disable idioms ("None"/"ReceiveChar")
+/// map to [DisableBindingIntent] so the chord is removed in
+/// [bindingsToShortcuts]; returns null only when the name is empty.
 Intent? _intentForAction(String action) {
   switch (action) {
     case 'Paste':
@@ -128,6 +138,8 @@ Intent? _intentForAction(String action) {
       return const ToggleSearchIntent();
     case 'None':
     case 'ReceiveChar':
+      return const DisableBindingIntent();
+    case '':
       return null;
     default:
       // Full-parity: every other alacritty action is recognized but no-op.
@@ -207,6 +219,9 @@ List<KeyBinding> parseKeyBindings(List<RawKeyBinding> raw) {
       shortcuts.removeWhere((key, _) =>
           key is SingleActivator && _singleActivatorsEqual(key, activator));
     }
+    // Disable idiom (None/ReceiveChar): the chord is now removed; don't
+    // reinstall it. Other intents replace the (possibly default) binding.
+    if (b.intent is DisableBindingIntent) continue;
     shortcuts[activator] = b.intent;
   }
   return (shortcuts, <Type, Action<Intent>>{});

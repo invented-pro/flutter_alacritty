@@ -163,8 +163,13 @@ class FakeBinding implements RewireableEngineBinding {
   }
   @override
   void clearHistory() {}
+  int reconfigureCalls = 0;
+  EngineConfig? lastReconfigure;
   @override
-  void reconfigure(EngineConfig config) {}
+  void reconfigure(EngineConfig config) {
+    reconfigureCalls++;
+    lastReconfigure = config;
+  }
   @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) {
     selStartCalls++;

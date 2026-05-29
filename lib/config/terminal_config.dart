@@ -110,6 +110,11 @@ class FontConfig {
   final FontStyleConfig? bold;
   final FontStyleConfig? italic;
   final FontStyleConfig? boldItalic;
+
+  // NOTE: offset/glyphOffset are parsed for alacritty config compatibility but
+  // not yet applied to cell metrics / glyph painting. Accepted-but-inert (like
+  // window.opacity/decorations) so configs don't error; wiring is deferred —
+  // see docs/superpowers/plans/2026-05-29-plan2o-2nb-findings.md.
   final double offsetX;
   final double offsetY;
   final double glyphOffsetX;

@@ -37,6 +37,21 @@ class CellOffset {
   final int column;
 }
 
+/// The mouse pointer shape over a terminal cell, mirroring alacritty's
+/// `reset_mouse_cursor` (`MouseCursorDirty` handling): a link shows the click
+/// pointer; when the app captures the mouse (`MOUSE_MODE`) the pointer reverts
+/// to the platform arrow; otherwise the configured [base] (an I-beam) is used.
+/// Pure so it's unit-testable without driving pointer events.
+MouseCursor hoverCursorFor({
+  required bool hyperlink,
+  required int modeFlags,
+  required MouseCursor base,
+}) {
+  if (hyperlink) return SystemMouseCursors.click;
+  if (anyMouse(modeFlags)) return SystemMouseCursors.basic;
+  return base;
+}
+
 /// Pure render + input view over a [TerminalEngine].
 ///
 /// Owns render state (font, metrics, glyph cache, bell controller, blink
@@ -60,6 +75,7 @@ class TerminalView extends StatefulWidget {
     this.mouseCursor = SystemMouseCursors.text,
     this.readOnly = false,
     this.cursorBlinkInterval = const Duration(milliseconds: 530),
+    this.cursorBlinkTimeout = const Duration(seconds: 5),
     this.bellDuration = Duration.zero,
     this.doubleClickThreshold = const Duration(milliseconds: 300),
     this.scrollMultiplier = 3,
@@ -90,6 +106,11 @@ class TerminalView extends StatefulWidget {
 
   /// Cursor blink half-period.
   final Duration cursorBlinkInterval;
+
+  /// Stop blinking after this much inactivity (no terminal input); the cursor
+  /// then stays solid until the next input. `Duration.zero` = never stop.
+  /// Mirrors alacritty's `cursor.blink_timeout`.
+  final Duration cursorBlinkTimeout;
 
   /// Bell flash duration (zero disables the visual bell).
   final Duration bellDuration;
@@ -156,6 +177,9 @@ class TerminalViewState extends State<TerminalView>
 
   final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
   Timer? _blinkTimer;
+  // Wall-clock of the last terminal input; drives `cursorBlinkTimeout` (blink
+  // pauses after inactivity, resumes solid-then-blinking on the next input).
+  DateTime _lastInputAt = DateTime.now();
 
   String? _preedit;
   late final ImeSession _ime = ImeSession(
@@ -216,9 +240,7 @@ class TerminalViewState extends State<TerminalView>
           ? widget.bellDuration
           : const Duration(milliseconds: 1),
     );
-    _blinkTimer = Timer.periodic(widget.cursorBlinkInterval, (_) {
-      _blinkOn.value = !_blinkOn.value;
-    });
+    _blinkTimer = Timer.periodic(widget.cursorBlinkInterval, (_) => _blinkTick());
     _focus.addListener(_reportFocus);
     _focus.addListener(_handleImeFocusChange);
     _bellSub = _engine.bell.listen((_) => _flashBell());
@@ -263,6 +285,11 @@ class TerminalViewState extends State<TerminalView>
       _bellCtrl.duration = widget.bellDuration > Duration.zero
           ? widget.bellDuration
           : const Duration(milliseconds: 1);
+    }
+    if (oldWidget.cursorBlinkInterval != widget.cursorBlinkInterval) {
+      _blinkTimer?.cancel();
+      _blinkTimer =
+          Timer.periodic(widget.cursorBlinkInterval, (_) => _blinkTick());
     }
     if (oldWidget.textStyle != widget.textStyle) {
       setState(() {
@@ -400,7 +427,23 @@ class TerminalViewState extends State<TerminalView>
   /// leaving mouse/IME/middle-paste paths leaking bytes — caught in review.
   void _writeToEngine(Uint8List bytes) {
     if (widget.readOnly) return;
+    // Reset the blink-idle timer and show a solid cursor immediately so the
+    // caret reappears the instant the user types (alacritty parity).
+    _lastInputAt = DateTime.now();
+    if (!_blinkOn.value) _blinkOn.value = true;
     _engine.write(bytes);
+  }
+
+  /// One blink period: toggle the caret unless we're past the inactivity
+  /// timeout, in which case hold it solid until the next input.
+  void _blinkTick() {
+    final timeout = widget.cursorBlinkTimeout;
+    if (timeout > Duration.zero &&
+        DateTime.now().difference(_lastInputAt) > timeout) {
+      if (!_blinkOn.value) _blinkOn.value = true; // hold solid while idle
+      return;
+    }
+    _blinkOn.value = !_blinkOn.value;
   }
 
   void _reportFocus() {
@@ -463,14 +506,11 @@ class TerminalViewState extends State<TerminalView>
     final hyper = _grid.rows > r &&
         _grid.columns > c &&
         isHyperlink(_grid.flagsAt(r, c));
-    final MouseCursor next;
-    if (hyper) {
-      next = SystemMouseCursors.click;
-    } else if (anyMouse(_grid.modeFlags)) {
-      next = SystemMouseCursors.basic;
-    } else {
-      next = widget.mouseCursor;
-    }
+    final next = hoverCursorFor(
+      hyperlink: hyper,
+      modeFlags: _grid.modeFlags,
+      base: widget.mouseCursor,
+    );
     if (next != _hoverCursor) setState(() => _hoverCursor = next);
   }
 

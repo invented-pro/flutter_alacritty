@@ -1,4 +1,3 @@
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/controller/terminal_controller.dart';

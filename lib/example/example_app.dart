@@ -427,6 +427,8 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
                         autofocus: true,
                         cursorBlinkInterval: Duration(
                             milliseconds: _config.cursor.blinkInterval),
+                        cursorBlinkTimeout:
+                            Duration(seconds: _config.cursor.blinkTimeout),
                         bellDuration:
                             Duration(milliseconds: _config.bell.duration),
                         doubleClickThreshold: Duration(

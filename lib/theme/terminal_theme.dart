@@ -8,6 +8,7 @@
 /// of the cell under the cursor" (alacritty parity).
 library;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/painting.dart' show TextStyle;
 
 /// All colors a [TerminalView] needs to paint a frame and the bell overlay.
@@ -126,5 +127,33 @@ class TerminalStyle {
         boldFamily: boldFamily ?? this.boldFamily,
         italicFamily: italicFamily ?? this.italicFamily,
         boldItalicFamily: boldItalicFamily ?? this.boldItalicFamily,
+      );
+
+  // Value equality so `TerminalView.didUpdateWidget` only flushes the glyph
+  // cache / remeasures metrics when a font-relevant field actually changes —
+  // `TerminalConfig.style` returns a fresh instance on every build, so identity
+  // equality would re-flush on every unrelated parent setState.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TerminalStyle &&
+          runtimeType == other.runtimeType &&
+          family == other.family &&
+          size == other.size &&
+          lineHeight == other.lineHeight &&
+          boldFamily == other.boldFamily &&
+          italicFamily == other.italicFamily &&
+          boldItalicFamily == other.boldItalicFamily &&
+          listEquals(fallback, other.fallback);
+
+  @override
+  int get hashCode => Object.hash(
+        family,
+        Object.hashAll(fallback),
+        size,
+        lineHeight,
+        boldFamily,
+        italicFamily,
+        boldItalicFamily,
       );
 }
