@@ -37,7 +37,50 @@
 - Keybinding `mode` gating for AppCursor/AppKeypad/Alt via `mode_flags`.
 - Vi/tabs/window actions remain `UnsupportedActionIntent` no-ops.
 
+## Code review (pre-merge) + fixes
+
+Pre-merge review (subagent) on `main..f2c0dbb` + submodule `5d350ba..087b19f`. Verdict:
+"No / with fixes" — one Critical, four Important, three Minor. Resolved:
+
+- **Critical #1 — submodule codegen drift.** The committed submodule `frb_generated.rs`
+  was stale (content hash `-447713057`, missing `engine_reconfigure`, off-by-one sync
+  dispatcher); a clean checkout would throw at `RustLib.init()` on the hash mismatch. The
+  only thing reconciling it was an *uncommitted* working-tree regen. Fixed: regenerated +
+  committed in submodule (`d2b062b`, hash `1837108674`) and bumped the parent pointer
+  (`13892d9`). Recommend a CI check that fails when the submodule is dirty after codegen.
+- **Important #2 — glyph-cache thrash.** `TerminalStyle` had no value equality and
+  `TerminalConfig.style` returns a fresh instance each build, so the view's
+  `oldWidget.textStyle != widget.textStyle` guard fired on every unrelated `setState`,
+  re-flushing the glyph cache / remeasuring metrics. Fixed: added `==`/`hashCode` to
+  `TerminalStyle` (commit `81ad546`).
+- **Important #3 — disable idiom.** `action="None"/"ReceiveChar"` were dropped instead of
+  removing the matched (default) chord. Fixed: `DisableBindingIntent` sentinel +
+  `bindingsToShortcuts` removal; +2 tests.
+- **Important #4 — parsed-but-inert config.** `cursor.blink_timeout` now wired
+  (`TerminalView.cursorBlinkTimeout`: blink pauses after inactivity, resumes on input;
+  blink interval also hot-reloads). `font.offset`/`glyph_offset` documented as
+  accepted-but-inert (deferred) in `terminal_config.dart`.
+- **Important #5 — missing Dart integration tests.** Added `test/review_fixes_test.dart`:
+  pure `hoverCursorFor` (mouse-mode → arrow) unit tests + a hot-reload widget test
+  (asserts `engine.reconfigure` called + theme swapped). Extracted `hoverCursorFor` as a
+  pure top-level fn for testability.
+- **Minor #8** — removed unused import in `terminal_shortcuts_actions_test.dart`.
+
+Post-fix: `flutter test` 204 pass, `cargo test` 42 pass, `flutter analyze` clean.
+
+### Minor — accepted as known limitations (not fixed)
+
+- **#6** Per-style font (`[font.bold]` etc.) only renders a distinct weight when the
+  configured `family` is itself a separately-registered family name; a same-family
+  "Bold" style won't bold via `fontWeight` in this path. `FontStyleConfig.style` is parsed
+  but unused. Document for users; revisit if needed.
+- **#7** `window.decorations` accepts any string (host-applied only); no validation to the
+  `full|none|transparent|buttonless` set.
+
 ## Roadmap
 
 - **2O-a, 2O-b, 2N-b** — delivered on this branch.
 - **Hot-reload** — `ConfigLoader.watch` + example `configUpdates` stream.
+- **Pre-merge note:** the submodule commits (`…d2b062b`) live on the submodule's `main`,
+  unpushed; pushing the parent feature branch must be accompanied by pushing the submodule
+  so the recorded pointer doesn't dangle.
