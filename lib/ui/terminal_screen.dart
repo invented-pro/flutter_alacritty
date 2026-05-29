@@ -13,6 +13,7 @@ import '../pty/flutter_pty_backend.dart';
 import '../pty/pty_backend.dart';
 import '../render/cell_metrics.dart';
 import 'search_bar.dart';
+import 'terminal_shortcuts.dart';
 import 'terminal_view.dart';
 
 // Re-exported so consumers keep importing the typedef from this file.
@@ -338,81 +339,102 @@ class _TerminalScreenState extends State<TerminalScreen> {
               .addPostFrameCallback((_) => _ensureStarted(cols, rows));
           return DropTarget(
             onDragDone: _onDrop,
-            child: Focus(
-              // Parent Focus catches hotkeys (Ctrl+Shift+F) that arrive when
-              // the search bar's TextField has focus — the bar is a sibling
-              // of TerminalView under the Stack, so the View's Focus is not
-              // an ancestor of the search bar's input. Returning `ignored`
-              // for everything else lets the View's Focus handle keys when
-              // the terminal is focused.
-              onKeyEvent: _onScreenKey,
-              child: Stack(
-              children: [
-                if (_engine != null)
-                  TerminalView(
-                    _engine!,
-                    key: _viewKey,
-                    controller: _controller,
-                    theme: _config.theme,
-                    textStyle: _config.style,
-                    focusNode: _focus,
-                    autofocus: true,
-                    cursorBlinkInterval:
-                        Duration(milliseconds: _config.cursor.blinkInterval),
-                    bellDuration: Duration(milliseconds: _config.bell.duration),
-                    doubleClickThreshold:
-                        Duration(milliseconds: _config.mouse.doubleClickThreshold),
-                    scrollMultiplier: _config.scrolling.multiplier,
-                    preeditBg: _config.ime.preeditBg,
-                    preeditFg: _config.ime.preeditFg,
-                    preeditUnderline: _config.ime.underline,
-                    onSecondaryTapUp: _onViewSecondaryTapUp,
-                    onLinkActivate: _onLinkActivate,
-                    onPaste: _paste,
-                    onCopy: _copySelection,
-                    onSearchToggle: _toggleSearch,
+            // Screen-level Shortcuts+Actions ensures Ctrl+Shift+F toggles the
+            // search bar even when the bar's TextField has focus (the search
+            // bar is a sibling of TerminalView under the Stack, so the View's
+            // own Shortcuts ancestor doesn't reach it). The view re-installs
+            // its own Shortcuts/Actions internally; this just makes the
+            // search-toggle chord available everywhere.
+            child: Shortcuts(
+              shortcuts: const <ShortcutActivator, Intent>{
+                SingleActivator(LogicalKeyboardKey.keyF,
+                    control: true, shift: true): ToggleSearchIntent(),
+              },
+              child: Actions(
+                actions: <Type, Action<Intent>>{
+                  ToggleSearchIntent: CallbackAction<ToggleSearchIntent>(
+                    onInvoke: (_) {
+                      _toggleSearch();
+                      return null;
+                    },
                   ),
-                if (_status != TermStatus.running) _buildRestartLayer(),
-                // Always mounted under Offstage so first-time costs (IME
-                // attach on Linux, Material icon/font load) are paid at app
-                // startup — opening search just toggles visibility.
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Offstage(
-                    offstage: !_searchOpen,
-                    child: TerminalSearchBar(
-                      visible: _searchOpen,
-                      invalidPattern: !_controller.searchValid,
-                      onChanged: _searchChanged,
-                      onNext: _controller.searchNext,
-                      onPrev: _controller.searchPrev,
-                      onClose: _closeSearch,
+                },
+                child: Stack(
+                  children: [
+                    if (_engine != null)
+                      TerminalView(
+                        _engine!,
+                        key: _viewKey,
+                        controller: _controller,
+                        theme: _config.theme,
+                        textStyle: _config.style,
+                        focusNode: _focus,
+                        autofocus: true,
+                        cursorBlinkInterval: Duration(
+                            milliseconds: _config.cursor.blinkInterval),
+                        bellDuration:
+                            Duration(milliseconds: _config.bell.duration),
+                        doubleClickThreshold: Duration(
+                            milliseconds: _config.mouse.doubleClickThreshold),
+                        scrollMultiplier: _config.scrolling.multiplier,
+                        preeditBg: _config.ime.preeditBg,
+                        preeditFg: _config.ime.preeditFg,
+                        preeditUnderline: _config.ime.underline,
+                        // Host-side overrides only — the view's internal
+                        // default actions cover zoom, and a no-host Copy
+                        // would just write the engine selection to the
+                        // clipboard. Here we override Copy/Paste/Search so
+                        // the screen-level state (search-bar visibility,
+                        // selection-clear-on-paste) stays consistent.
+                        actions: <Type, Action<Intent>>{
+                          CopyIntent: CallbackAction<CopyIntent>(
+                            onInvoke: (_) {
+                              _copySelection();
+                              return null;
+                            },
+                          ),
+                          PasteIntent: CallbackAction<PasteIntent>(
+                            onInvoke: (_) => _paste(),
+                          ),
+                          ToggleSearchIntent:
+                              CallbackAction<ToggleSearchIntent>(
+                            onInvoke: (_) {
+                              _toggleSearch();
+                              return null;
+                            },
+                          ),
+                        },
+                        onSecondaryTapUp: _onViewSecondaryTapUp,
+                        onLinkActivate: _onLinkActivate,
+                      ),
+                    if (_status != TermStatus.running) _buildRestartLayer(),
+                    // Always mounted under Offstage so first-time costs (IME
+                    // attach on Linux, Material icon/font load) are paid at
+                    // app startup — opening search just toggles visibility.
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Offstage(
+                        offstage: !_searchOpen,
+                        child: TerminalSearchBar(
+                          visible: _searchOpen,
+                          invalidPattern: !_controller.searchValid,
+                          onChanged: _searchChanged,
+                          onNext: _controller.searchNext,
+                          onPrev: _controller.searchPrev,
+                          onClose: _closeSearch,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
               ),
             ),
           );
         },
       ),
     );
-  }
-
-  KeyEventResult _onScreenKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    final hw = HardwareKeyboard.instance;
-    if (hw.isControlPressed &&
-        hw.isShiftPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyF) {
-      _toggleSearch();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
   }
 
   /// Restart overlay: absorbs any tap / key and triggers `_restart`. Sits on

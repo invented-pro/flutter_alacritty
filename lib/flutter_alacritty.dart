@@ -9,4 +9,5 @@ export 'pty/pty_backend.dart';
 export 'pty/flutter_pty_backend.dart';
 export 'theme/terminal_theme.dart';
 export 'ui/terminal_screen.dart';
+export 'ui/terminal_shortcuts.dart';
 export 'ui/terminal_view.dart';

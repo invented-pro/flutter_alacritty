@@ -1,9 +1,17 @@
 import 'dart:async';
 import 'dart:convert' show utf8;
+import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'
+    show
+        HardwareKeyboard,
+        KeyDownEvent,
+        KeyEvent,
+        KeyRepeatEvent,
+        SystemSound,
+        SystemSoundType;
 
 import '../controller/terminal_controller.dart';
 import '../engine/terminal_engine.dart';
@@ -19,6 +27,7 @@ import '../render/mirror_grid.dart';
 import '../render/terminal_painter.dart';
 import '../theme/terminal_theme.dart';
 import 'preedit_overlay.dart';
+import 'terminal_shortcuts.dart';
 
 /// Logical cell coordinate (row, column) exposed to callback parameters so
 /// consumers can act on tap location without reaching into the painter.
@@ -31,15 +40,12 @@ class CellOffset {
 /// Pure render + input view over a [TerminalEngine].
 ///
 /// Owns render state (font, metrics, glyph cache, bell controller, blink
-/// timer), IME session, pointer/selection state, and the inline `_onKey`
-/// hotkey switch. Does NOT own the engine, the PTY, the search bar widget,
-/// drop handling, the right-click context menu, or URL launching — those
-/// stay on `TerminalScreen` (or a future host) and are wired in via the
-/// callback hooks below.
-///
-/// TODO(2W-3b): replace the inline `_onKey` with a Shortcuts/Actions split so
-/// the view becomes fully pure (no hotkey logic), and add `shortcuts:` /
-/// per-callback props for paste/copy/zoom/searchToggle.
+/// timer), IME session, and pointer/selection state. Hotkeys are dispatched
+/// through Flutter's `Shortcuts` + `Actions` framework rather than an
+/// inline switch — see [shortcuts] and [actions]. Does NOT own the engine,
+/// the PTY, the search bar widget, drop handling, the right-click context
+/// menu, or URL launching — those stay on `TerminalScreen` (or a future
+/// host) and are wired in via the callback hooks below.
 class TerminalView extends StatefulWidget {
   const TerminalView(
     this.engine, {
@@ -60,15 +66,13 @@ class TerminalView extends StatefulWidget {
     this.preeditBg = 0x282828,
     this.preeditFg = 0xD8D8D8,
     this.preeditUnderline = true,
+    this.shortcuts,
+    this.actions,
     this.onTapDown,
     this.onTapUp,
     this.onSecondaryTapDown,
     this.onSecondaryTapUp,
     this.onLinkActivate,
-    this.onPaste,
-    this.onCopy,
-    this.onRestart,
-    this.onSearchToggle,
     this.onBell,
   });
 
@@ -100,30 +104,28 @@ class TerminalView extends StatefulWidget {
   final int preeditFg;
   final bool preeditUnderline;
 
-  // Callback hooks — TerminalScreen wires these (context menu, URL launch).
-  // For 3a these are accepted as parameters but only the ones we explicitly
-  // need pass through (secondary tap → context menu, link → launcher); the
-  // rest land with 3b.
+  /// Hotkey bindings. `null` means use [defaultTerminalShortcuts]; pass an
+  /// empty map (`const {}`) to disable every default; pass any other map to
+  /// override individual entries (the view does NOT merge with defaults —
+  /// the supplied map is the complete shortcut set).
+  final Map<ShortcutActivator, Intent>? shortcuts;
+
+  /// Action handlers for the intents dispatched by [shortcuts]. `null`
+  /// means the view builds [defaultTerminalActions] internally (with a
+  /// no-op paste/search/zoom and a self-contained copy that writes the
+  /// engine selection to the system clipboard). Hosts typically supply
+  /// their own actions to wire host-side semantics (search-bar visibility,
+  /// custom paste filtering, etc.).
+  final Map<Type, Action<Intent>>? actions;
+
+  // Pointer / hyperlink callback hooks — TerminalScreen wires these
+  // (context menu, URL launch). These cover screen-driven UI bits the
+  // view itself can't decide.
   final void Function(TapDownDetails, CellOffset)? onTapDown;
   final void Function(TapUpDetails, CellOffset)? onTapUp;
   final void Function(TapDownDetails, CellOffset)? onSecondaryTapDown;
   final void Function(TapUpDetails, CellOffset)? onSecondaryTapUp;
   final void Function(String uri)? onLinkActivate;
-
-  /// Ctrl+Shift+V: host-controlled paste (Clipboard read happens off-view).
-  /// If null, the view falls back to its own Clipboard.getData('text/plain').
-  final Future<void> Function()? onPaste;
-
-  /// Ctrl+Shift+C: copy selection. If null, the view writes the engine
-  /// selection text to the system clipboard.
-  final void Function()? onCopy;
-
-  /// Any key while the engine has exited / errored — restart hook. If null,
-  /// the view ignores the keypress in that state.
-  final void Function()? onRestart;
-
-  /// Ctrl+Shift+F: search toggle. If null, the view ignores the combo.
-  final void Function()? onSearchToggle;
 
   /// Bell event hook (fires in addition to the visual flash). If null, the
   /// view plays a system alert sound (current behavior).
@@ -289,66 +291,40 @@ class TerminalViewState extends State<TerminalView>
     });
   }
 
-  // TODO(2W-3b): replace inline switch with Shortcuts/Actions + onPaste/onCopy
-  // /onSearchToggle hooks so this method drops the search/copy/paste branches
-  // and the view becomes pure (no _searchOpen knowledge, no Clipboard import).
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+  /// Encode-and-write fallback. Runs after the Shortcuts framework has had
+  /// a chance to match the chord against [defaultTerminalShortcuts] (or the
+  /// consumer-supplied map). For matched chords we early-return so the
+  /// encodeKey path doesn't double-fire (e.g. Ctrl+Shift+F would otherwise
+  /// also produce the 0x06 control byte).
+  ///
+  /// Why this ordering rather than nesting Shortcuts below: with `Focus` as
+  /// the focused widget, Flutter dispatches `onKeyEvent` bottom-up before
+  /// reaching any ancestor `Shortcuts` widget, so we have to perform the
+  /// activator match ourselves here and bail before the encodeKey hop.
+  KeyEventResult _onKeyFallback(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
     if (widget.readOnly) return KeyEventResult.ignored;
-    if (widget.onRestart != null) {
-      // Host can override the "any key restarts" semantic; if the host wants
-      // it, it sets onRestart and gates the call. The view itself doesn't
-      // know the engine status — by contract, TerminalScreen builds us only
-      // while the engine is running, and the restart UI is overlaid on top.
-    }
     final hw = HardwareKeyboard.instance;
-    if (hw.isControlPressed &&
-        hw.isShiftPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyF) {
-      widget.onSearchToggle?.call();
-      return KeyEventResult.handled;
-    }
-    if (hw.isControlPressed && !hw.isShiftPressed && !hw.isAltPressed) {
-      if (event.logicalKey == LogicalKeyboardKey.equal ||
-          event.logicalKey == LogicalKeyboardKey.numpadAdd) {
-        _setZoom(_fontSize + 1.0);
+    // Let the Shortcuts/Actions framework claim the chord first. If any
+    // registered activator matches, we dispatch via `Actions.maybeFind` +
+    // explicit invocation (the `maybeInvoke` shortcut would only report
+    // success via its return value, but our actions return null on purpose
+    // since they wrap void callbacks). On a successful dispatch we return
+    // `handled` so the event doesn't continue propagating into ancestor
+    // Shortcuts widgets (e.g. a screen-level Ctrl+Shift+F override would
+    // otherwise double-fire).
+    final shortcuts = widget.shortcuts ?? defaultTerminalShortcuts;
+    for (final entry in shortcuts.entries) {
+      if (entry.key.accepts(event, hw)) {
+        final ctx = node.context;
+        if (ctx == null) return KeyEventResult.ignored;
+        final action = Actions.maybeFind<Intent>(ctx, intent: entry.value);
+        if (action == null) return KeyEventResult.ignored;
+        Actions.of(ctx).invokeActionIfEnabled(action, entry.value, ctx);
         return KeyEventResult.handled;
       }
-      if (event.logicalKey == LogicalKeyboardKey.minus ||
-          event.logicalKey == LogicalKeyboardKey.numpadSubtract) {
-        _setZoom(_fontSize - 1.0);
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.digit0 ||
-          event.logicalKey == LogicalKeyboardKey.numpad0) {
-        _setZoom(widget.textStyle.size);
-        return KeyEventResult.handled;
-      }
-    }
-    if (hw.isControlPressed &&
-        hw.isShiftPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyV) {
-      if (widget.onPaste != null) {
-        widget.onPaste!();
-      } else {
-        _paste();
-      }
-      return KeyEventResult.handled;
-    }
-    if (hw.isControlPressed &&
-        hw.isShiftPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyC) {
-      if (widget.onCopy != null) {
-        widget.onCopy!();
-      } else {
-        final text = _controller.readSelectionText();
-        if (text != null && text.isNotEmpty) {
-          Clipboard.setData(ClipboardData(text: text));
-        }
-      }
-      return KeyEventResult.handled;
     }
     if (_ime.isAttached &&
         _ime.isComposing &&
@@ -384,14 +360,6 @@ class TerminalViewState extends State<TerminalView>
       _controller.clearSelection();
       if (!scrolledBack) _refreshSelection();
     }
-  }
-
-  Future<void> _paste() async {
-    final data = await Clipboard.getData('text/plain');
-    final text = data?.text;
-    if (text == null || text.isEmpty) return;
-    _onTerminalInputStart();
-    _engine.write(pasteBytes(text, modeFlags: _grid.modeFlags));
   }
 
   void _reportFocus() {
@@ -521,11 +489,7 @@ class TerminalViewState extends State<TerminalView>
         _ensureSizing(cols, rows);
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _reportCaretRectToIme());
-        Widget tree = Focus(
-          focusNode: _focus,
-          autofocus: widget.autofocus,
-          onKeyEvent: _onKey,
-          child: Listener(
+        Widget tree = Listener(
             onPointerDown: _onPointerDown,
             onPointerMove: _onPointerMove,
             onPointerUp: _onPointerUp,
@@ -601,12 +565,44 @@ class TerminalViewState extends State<TerminalView>
                 ],
               ),
             ),
-          ),
-        );
+          );
         if (widget.padding != null) {
           tree = Padding(padding: widget.padding!, child: tree);
         }
-        return tree;
+        // Build the merged actions map: view-internal defaults (which
+        // wire zoom into `_setZoom` and supply self-contained Copy + Paste)
+        // overlayed by any host-supplied `widget.actions` so the host can
+        // override Copy/Paste/ToggleSearch while leaving zoom to the view.
+        // Per-type override; no per-Intent fallthrough.
+        final mergedActions = <Type, Action<Intent>>{
+          ...defaultTerminalActions(
+            controller: _controller,
+            engine: _engine,
+            onSetZoom: _setZoom,
+            baselineFontSize: widget.textStyle.size,
+            currentFontSize: () => _fontSize,
+          ),
+          ...?widget.actions,
+        };
+        // Wrap order:  Shortcuts ▸ Actions ▸ Focus ▸ tree.
+        // The inner Focus is the actual focused widget; key events propagate
+        // BOTTOM-UP, so we have to match the activator list ourselves in
+        // `_onKeyFallback` and dispatch via `Actions.maybeInvoke` (which
+        // walks UP to the ancestor `Actions` widget) before falling through
+        // to the encodeKey path. If we let the encodeKey run unconditionally,
+        // chords like Ctrl+Shift+F would also produce the 0x06 control byte.
+        return Shortcuts(
+          shortcuts: widget.shortcuts ?? defaultTerminalShortcuts,
+          child: Actions(
+            actions: mergedActions,
+            child: Focus(
+              focusNode: _focus,
+              autofocus: widget.autofocus,
+              onKeyEvent: _onKeyFallback,
+              child: tree,
+            ),
+          ),
+        );
       },
     );
   }
@@ -636,6 +632,16 @@ class TerminalViewState extends State<TerminalView>
           : 1;
       _lastClick = now;
       final (r, c, rh) = _cellAt(e.localPosition);
+      if (widget.onTapDown != null) {
+        widget.onTapDown!(
+          TapDownDetails(
+            globalPosition: e.position,
+            localPosition: e.localPosition,
+            kind: e.kind,
+          ),
+          CellOffset(r, c),
+        );
+      }
       _controller.selectionStart(r, c, rh, _clickCount - 1);
       _selecting = true;
       _refreshSelection();
@@ -698,6 +704,17 @@ class TerminalViewState extends State<TerminalView>
     if (_selecting) {
       _selecting = false;
       _controller.capturePrimary();
+      if (widget.onTapUp != null) {
+        final (r, c, _) = _cellAt(e.localPosition);
+        widget.onTapUp!(
+          TapUpDetails(
+            globalPosition: e.position,
+            localPosition: e.localPosition,
+            kind: e.kind,
+          ),
+          CellOffset(r, c),
+        );
+      }
       return;
     }
     _reportMouse(e.localPosition, _pressedButton, MouseAction.up);
