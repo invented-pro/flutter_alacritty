@@ -170,6 +170,15 @@ class TerminalEngine {
   Future<void> scrollLines(int delta) async {
     await _client?.scrollLines(delta);
   }
+
+  /// Fire-and-forget scroll for input-driven paths (mouse wheel, trackpad
+  /// pan, touch fling). Multiple calls within one frame coalesce into one
+  /// engine call + one snapshot.
+  ///
+  /// For deterministic / awaited scroll (PageUp/Down, programmatic ScrollTo*),
+  /// use [scrollLines] / [scrollToBottom].
+  void scrollBy(int delta) => _client?.scheduleScrollBy(delta);
+
   Future<void> scrollToBottom() async {
     await _client?.scrollToBottom();
   }

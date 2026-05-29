@@ -35,6 +35,10 @@ class TerminalEngineClient {
   bool _advancing = false;
   int? _pendingColumns;
   int? _pendingRows;
+  int _pendingScrollDelta = 0;
+  bool _scrollScheduled = false;
+  bool _scrollApplying = false;
+  bool _disposed = false;
   /// Re-applies the current viewport. Always uses the searched snapshot — the
   /// Rust side short-circuits to a plain snapshot when no search is active, so
   /// this is the same cost when idle and removes a class of Dart-side flag-
@@ -83,10 +87,18 @@ class TerminalEngineClient {
 
   Future<void> _drain() async {
     _drainScheduled = false;
-    if (_buf.isEmpty) return;
+    // Hold the advance guard across the WHOLE drain, including the scroll apply
+    // below. Otherwise a feed() arriving during an awaited scroll/advance slips
+    // past _scheduleDrain's (_drainScheduled || _advancing) gate and starts a
+    // second overlapping advanceAndTakeDamage on the same engine.
     _advancing = true;
-    final batch = _buf.takeBytes();
     try {
+      // Apply coalesced scroll before ingesting PTY bytes. When scrolled back,
+      // alacritty's scroll_up increases display_offset; deferring scroll until
+      // after the drain lets output outrun wheel-down (can't reach the live end).
+      await _applyPendingScroll();
+      if (_buf.isEmpty) return;
+      final batch = _buf.takeBytes();
       final update = await _binding.advanceAndTakeDamage(batch);
       _applyUpdate(update);
       _binding.pumpEvents(); // route PtyWrite/Title/Bell/Clipboard for this batch
@@ -133,10 +145,60 @@ class TerminalEngineClient {
     refreshView();
   }
 
+  /// Coalesced scroll. Multiple calls within one scheduling tick aggregate
+  /// into a single FFI scrollLines + refreshView. Use this for input-driven
+  /// scroll paths (wheel, trackpad pan, touch fling) where the per-event
+  /// snapshot rate would otherwise saturate the UI thread.
+  ///
+  /// Programmatic callers that need the future (PageUp/PageDown, ScrollTo*)
+  /// should keep using [scrollLines] / [scrollToBottom] which await the
+  /// underlying FFI.
+  void scheduleScrollBy(int delta) {
+    if (delta == 0 || _disposed) return;
+    _pendingScrollDelta += delta;
+    _ensureScrollScheduled();
+  }
+
+  /// Schedules a single post-frame [_applyPendingScroll] when scroll is pending
+  /// and none is already queued. Idempotent — safe to call from
+  /// [scheduleScrollBy] and from a flush's `finally`.
+  void _ensureScrollScheduled() {
+    if (_disposed || _scrollScheduled || _pendingScrollDelta == 0) return;
+    _scrollScheduled = true;
+    _schedule(() => _applyPendingScroll());
+  }
+
+  /// Applies the coalesced scroll accumulator. Called from the post-frame
+  /// scheduler and at the start of [_drain] so user scroll wins over PTY
+  /// output in the same frame.
+  ///
+  /// Re-entrancy is serialized by [_scrollApplying]: if a flush is already in
+  /// flight this is a no-op, and the in-flight flush's `finally` re-arms for
+  /// any delta that accumulated meanwhile — so a scheduled callback that fires
+  /// mid-flush is never lost (which would otherwise strand the accumulator with
+  /// [_scrollScheduled] stuck true and no callback queued).
+  Future<void> _applyPendingScroll() async {
+    _scrollScheduled = false;
+    if (_disposed || _pendingScrollDelta == 0 || _scrollApplying) return;
+    final delta = _pendingScrollDelta;
+    _pendingScrollDelta = 0;
+    _scrollApplying = true;
+    try {
+      await _binding.scrollLines(delta);
+      if (!_disposed) refreshView();
+    } finally {
+      _scrollApplying = false;
+      _ensureScrollScheduled();
+    }
+  }
+
   Future<void> scrollToBottom() async {
     await _binding.scrollToBottom();
     refreshView();
   }
 
-  void dispose() => _binding.dispose();
+  void dispose() {
+    _disposed = true;
+    _binding.dispose();
+  }
 }
