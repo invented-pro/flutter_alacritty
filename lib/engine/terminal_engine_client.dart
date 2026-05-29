@@ -197,6 +197,11 @@ class TerminalEngineClient {
     refreshView();
   }
 
+  void clearHistory() {
+    _binding.clearHistory();
+    refreshView();
+  }
+
   void dispose() {
     _disposed = true;
     _binding.dispose();

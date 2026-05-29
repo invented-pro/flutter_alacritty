@@ -65,6 +65,9 @@ Future<void> engineScrollLines({
 Future<void> engineScrollToBottom({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineScrollToBottom(engine: engine);
 
+void engineClearHistory({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineClearHistory(engine: engine);
+
 void engineSelectionStart({
   required TerminalEngine engine,
   required int displayRow,

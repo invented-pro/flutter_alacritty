@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart' as launcher;
 import '../config/terminal_config.dart';
 import '../controller/terminal_controller.dart';
 import '../engine/terminal_engine.dart';
+import '../input/key_bindings.dart';
 import '../input/paste.dart';
 import '../pty/flutter_pty_backend.dart';
 import '../pty/pty_backend.dart';
@@ -92,6 +93,8 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   late final UrlLauncher _launch = widget.launchUrl ??
       (u) async => launcher.launchUrl(Uri.parse(u));
   late final TerminalConfig _config = widget.config ?? TerminalConfig.defaults();
+  late final (Map<ShortcutActivator, Intent>, Map<Type, Action<Intent>>) _binds =
+      bindingsToShortcuts(_config.keyboard.bindings);
   // Cell metrics drive the cols/rows the engine is spawned/resized into. We
   // compute them once here from the textStyle so layoutBuilder→_ensureStarted
   // and the nested TerminalView agree on sizing (both derive from the same
@@ -388,6 +391,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
                         preeditBg: _config.ime.preeditBg,
                         preeditFg: _config.ime.preeditFg,
                         preeditUnderline: _config.ime.underline,
+                        shortcuts: _binds.$1,
                         // Host-side overrides only — the view's internal
                         // default actions cover zoom, and a no-host Copy
                         // would just write the engine selection to the

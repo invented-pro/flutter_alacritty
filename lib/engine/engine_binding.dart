@@ -23,6 +23,7 @@ abstract class EngineBinding {
   GridUpdate fullSnapshotSearched();
   Future<void> scrollLines(int delta);
   Future<void> scrollToBottom();
+  void clearHistory();
   void selectionStart(int displayRow, int col, bool rightHalf, int kind);
   void selectionUpdate(int displayRow, int col, bool rightHalf);
   void selectionClear();
@@ -110,6 +111,9 @@ class FrbEngineBinding implements EngineBinding {
 
   @override
   Future<void> scrollToBottom() => engineScrollToBottom(engine: _engine);
+
+  @override
+  void clearHistory() => engineClearHistory(engine: _engine);
 
   @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) =>

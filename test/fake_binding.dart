@@ -145,6 +145,8 @@ class FakeBinding implements RewireableEngineBinding {
     scrollToBottomCalls++;
   }
   @override
+  void clearHistory() {}
+  @override
   void selectionStart(int displayRow, int col, bool rightHalf, int kind) {
     selStartCalls++;
   }

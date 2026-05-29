@@ -183,6 +183,9 @@ class TerminalEngine {
     await _client?.scrollToBottom();
   }
 
+  /// Clear scrollback history (alacritty ClearHistory). No-op until bound.
+  void clearHistory() => _client?.clearHistory();
+
   /// Force a viewport refresh from the engine (used after selection changes,
   /// which alter FLAG_SELECTED on otherwise-unchanged cells).
   void refreshView() => _client?.refreshView();
