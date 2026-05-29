@@ -788,7 +788,7 @@ cd /home/hhoa/git/hhoa/flutter_alacritty && flutter run -d linux
 ```
 In the running terminal:
 - `printf '\e]11;#ff0000\a'` → background turns red (existing text cells + newly-typed lines).
-- `printf '\e]11;\a'` (or a colorscheme reset) → reverts.
+- `printf '\e]111\a'` (OSC 111) → reverts to config default. NOTE: `\e]11;\a` (empty OSC 11) does NOT reset — vte sends an empty color arg to `unhandled()` (vte ansi.rs:1444-1446), calling neither set_color nor reset_color. Only OSC 110/111/112 reset.
 - `printf '\e]12;#00ff00\a'` → cursor turns green; without it the cursor is inverse-video.
 - A program that queries (e.g. a script doing `printf '\e]11;?\a'; read -r reply` ) gets a reply instead of hanging.
 

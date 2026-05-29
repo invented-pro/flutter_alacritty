@@ -34,7 +34,7 @@ The example app was launched successfully (`flutter run -d linux`). Interactive 
 | Escape | Expected |
 |--------|----------|
 | `printf '\e]11;#ff0000\a'` | Background turns red (existing + new cells) |
-| `printf '\e]11;\a'` or colorscheme reset | Reverts to config default bg |
+| `printf '\e]111\a'` (OSC 111 reset) | Reverts to config default bg. NOTE: `\e]11;\a` (empty OSC 11) does **not** reset — vte routes an empty color arg to `unhandled()` (neither set nor reset). Use OSC 111. |
 | `printf '\e]12;#00ff00\a'` | Cursor turns green |
 | (no OSC 12) | Cursor stays inverse-video |
 | `printf '\e]11;?\a'; read -r reply` | Gets an OSC 11 rgb reply (no hang) |
