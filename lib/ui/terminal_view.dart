@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert' show utf8;
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart'
     show
         HardwareKeyboard,
@@ -28,6 +30,19 @@ import '../render/terminal_painter.dart';
 import '../theme/terminal_theme.dart';
 import 'preedit_overlay.dart';
 import 'terminal_shortcuts.dart';
+
+// Kinetic-fling tuning, ported from GNOME Shell's js/ui/swipeTracker.js. The
+// decelerations are per-millisecond velocity multipliers (the values that give
+// the desktop's signature "coast"); start/stop cutoffs are in px/s and chosen
+// for terminal scrolling (a coast distance of roughly half the fling speed).
+const double _kFlingDecelerationTouch = 0.998;
+// Tighter than GNOME's 0.997 — trackpad coast felt too long for terminal text.
+const double _kFlingDecelerationTouchpad = 0.995;
+const double _kFlingStartVelocity = 80.0;
+const double _kFlingStopVelocity = 18.0;
+// Trailing window over which a trackpad gesture's release velocity is averaged,
+// matching swipeTracker.js EVENT_HISTORY_THRESHOLD_MS.
+const int _kVelocityWindowMs = 150;
 
 /// Logical cell coordinate (row, column) exposed to callback parameters so
 /// consumers can act on tap location without reaching into the painter.
@@ -118,7 +133,11 @@ class TerminalView extends StatefulWidget {
   /// Double/triple-click window for word/line selection.
   final Duration doubleClickThreshold;
 
-  /// Lines per discrete wheel notch when scrolling locally.
+  /// Approximate lines scrolled per wheel notch (alacritty's
+  /// `scrolling.multiplier`; default 3). Scrollback is now sub-cell pixel
+  /// scroll, so this is applied to the platform pixel delta as
+  /// `scrollMultiplier / 3` — a raw wheel notch is ~3 lines of pixels, so the
+  /// default reproduces alacritty's 3-lines/notch and e.g. `1` ≈ one line/notch.
   final int scrollMultiplier;
 
   /// Preedit overlay colors / underline (packed RGB, alpha forced full).
@@ -162,7 +181,7 @@ class TerminalView extends StatefulWidget {
 }
 
 class TerminalViewState extends State<TerminalView>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   TerminalEngine get _engine => widget.engine;
   late TerminalController _controller;
   bool _ownsController = false;
@@ -202,7 +221,16 @@ class TerminalViewState extends State<TerminalView>
   DateTime _lastClick = DateTime.fromMillisecondsSinceEpoch(0);
   bool _selecting = false;
   double _touchScrollAccum = 0;
-  Timer? _flingTimer;
+  // Kinetic fling (touch + trackpad). Velocity in px/s, positive = scrolling up
+  // into history. Decays per GNOME Shell's swipeTracker model (decel^dt_ms) on a
+  // vsync Ticker so coast distance and smoothness match the desktop shell.
+  Ticker? _flingTicker;
+  double _flingVelocity = 0;
+  double _flingDecel = _kFlingDecelerationTouch;
+  Duration? _flingLastTick;
+  // Trailing (timestamp, dy) samples for estimating trackpad release velocity,
+  // since pan-zoom gestures carry no velocity of their own (unlike DragEnd).
+  final List<(Duration, double)> _panSamples = [];
   MouseCursor _hoverCursor = MouseCursor.defer;
 
   StreamSubscription<void>? _bellSub;
@@ -321,7 +349,7 @@ class TerminalViewState extends State<TerminalView>
 
   @override
   void dispose() {
-    _flingTimer?.cancel();
+    _stopFling();
     _blinkTimer?.cancel();
     _blinkOn.dispose();
     _bellSub?.cancel();
@@ -487,7 +515,9 @@ class TerminalViewState extends State<TerminalView>
     if (renderBox == null || !renderBox.attached) return;
     final localRect = Rect.fromLTWH(
       _grid.cursorCol * _metrics.width,
-      _grid.cursorRow * _metrics.height,
+      // Match the painter's sub-cell shift so the OS IME/preedit popup tracks
+      // the visually-shifted cursor during fractional scroll.
+      (_grid.cursorRow + _grid.scrollFraction) * _metrics.height,
       _metrics.width,
       _metrics.height,
     );
@@ -500,7 +530,11 @@ class TerminalViewState extends State<TerminalView>
 
   (int, int, bool) _cellAt(Offset local) {
     final col = (local.dx / _metrics.width).floor().clamp(0, _cols - 1);
-    final row = (local.dy / _metrics.height).floor().clamp(0, _rows - 1);
+    // The painter shifts content down by `scrollFraction * cellHeight` for
+    // sub-cell scroll; undo it here so hit-testing (selection, hover) lands on
+    // the row the user actually sees rather than the unscrolled grid row.
+    final yRows = local.dy / _metrics.height - _grid.scrollFraction;
+    final row = yRows.floor().clamp(0, _rows - 1);
     final rightHalf = (local.dx / _metrics.width) - col > 0.5;
     return (row, col, rightHalf);
   }
@@ -539,30 +573,96 @@ class TerminalViewState extends State<TerminalView>
           : 0;
 
   void _touchScrollBy(double dy) {
-    _touchScrollAccum += dy;
-    final lines = _touchScrollAccum ~/ _metrics.height;
-    if (lines == 0) return;
-    _touchScrollAccum -= lines * _metrics.height;
-    final up = lines > 0;
-    final n = lines.abs();
-    if (anyMouse(_grid.modeFlags)) {
-      for (var i = 0; i < n; i++) {
-        _reportMouse(Offset.zero, 0,
-            up ? MouseAction.scrollUp : MouseAction.scrollDown);
+    // Mouse-report and alt-screen apps consume scroll as discrete events (wheel
+    // report / arrow keys), so quantize to whole lines for those. The normal
+    // scrollback path scrolls with sub-cell pixel precision.
+    if (anyMouse(_grid.modeFlags) || _grid.modeFlags & kModeAltScreen != 0) {
+      _touchScrollAccum += dy;
+      final lines = _touchScrollAccum ~/ _metrics.height;
+      if (lines == 0) return;
+      _touchScrollAccum -= lines * _metrics.height;
+      final up = lines > 0;
+      final n = lines.abs();
+      if (anyMouse(_grid.modeFlags)) {
+        for (var i = 0; i < n; i++) {
+          _reportMouse(Offset.zero, 0,
+              up ? MouseAction.scrollUp : MouseAction.scrollDown);
+        }
+      } else {
+        final arrow = up ? [0x1b, 0x4f, 0x41] : [0x1b, 0x4f, 0x42];
+        for (var i = 0; i < n; i++) {
+          _writeToEngine(Uint8List.fromList(arrow));
+        }
       }
-    } else if (_grid.modeFlags & kModeAltScreen != 0) {
-      final arrow = up ? [0x1b, 0x4f, 0x41] : [0x1b, 0x4f, 0x42];
-      for (var i = 0; i < n; i++) {
-        _writeToEngine(Uint8List.fromList(arrow));
-      }
-    } else {
-      _engine.scrollBy(up ? n : -n);
+      return;
     }
+    // Dragging the finger down (dy > 0) reveals older content → scroll up into
+    // history, which is the engine's positive pixel delta.
+    _engine.scrollByPixels(dy);
   }
 
   void _stopFling() {
-    _flingTimer?.cancel();
-    _flingTimer = null;
+    _flingTicker?.dispose();
+    _flingTicker = null;
+    _flingVelocity = 0;
+  }
+
+  /// Start a kinetic fling from a gesture-end [velocityPxPerSec] (positive =
+  /// downward drag = scrolling up into history), decaying on a vsync Ticker with
+  /// [decel] (GNOME's per-ms multiplier: 0.998 touch, 0.997 touchpad).
+  void _startFling(double velocityPxPerSec,
+      {double decel = _kFlingDecelerationTouch}) {
+    _stopFling();
+    if (velocityPxPerSec.abs() < _kFlingStartVelocity) return;
+    // Don't kinetic-scroll into mouse-report / alt-screen apps.
+    if (anyMouse(_grid.modeFlags) || _grid.modeFlags & kModeAltScreen != 0) {
+      return;
+    }
+    _flingVelocity = velocityPxPerSec;
+    _flingDecel = decel;
+    _flingLastTick = null;
+    _flingTicker = createTicker(_onFlingTick)..start();
+  }
+
+  void _onFlingTick(Duration elapsed) {
+    final last = _flingLastTick;
+    if (last == null) {
+      _flingLastTick = elapsed;
+      return;
+    }
+    final dtMs = (elapsed - last).inMicroseconds / 1000.0;
+    _flingLastTick = elapsed;
+    if (dtMs <= 0) return;
+    // GNOME swipeTracker: velocity *= deceleration^dt_ms.
+    _flingVelocity *= math.pow(_flingDecel, dtMs);
+    if (_flingVelocity.abs() < _kFlingStopVelocity) {
+      _stopFling();
+      return;
+    }
+    _engine.scrollByPixels(_flingVelocity * dtMs / 1000.0);
+  }
+
+  /// Record a trackpad pan sample and trim to the trailing velocity window.
+  void _recordPanSample(Duration t, double dy) {
+    _panSamples.add((t, dy));
+    final cutoff = t - const Duration(milliseconds: _kVelocityWindowMs);
+    while (_panSamples.length > 1 && _panSamples.first.$1 < cutoff) {
+      _panSamples.removeAt(0);
+    }
+  }
+
+  /// Release velocity (px/s) over the trailing window, matching swipeTracker's
+  /// `calculateVelocity`: total delta after the first sample / elapsed period.
+  double _panReleaseVelocity() {
+    if (_panSamples.length < 2) return 0;
+    final periodMs =
+        (_panSamples.last.$1 - _panSamples.first.$1).inMicroseconds / 1000.0;
+    if (periodMs <= 0) return 0;
+    var total = 0.0;
+    for (var i = 1; i < _panSamples.length; i++) {
+      total += _panSamples[i].$2;
+    }
+    return total / periodMs * 1000.0;
   }
 
   void _syncViewportToHost(int cols, int rows) {
@@ -610,8 +710,19 @@ class TerminalViewState extends State<TerminalView>
             onPointerPanZoomStart: (_) {
               _stopFling();
               _touchScrollAccum = 0;
+              _panSamples.clear();
             },
-            onPointerPanZoomUpdate: (e) => _touchScrollBy(e.localPanDelta.dy),
+            onPointerPanZoomUpdate: (e) {
+              _recordPanSample(e.timeStamp, e.localPanDelta.dy);
+              _touchScrollBy(e.localPanDelta.dy);
+            },
+            // Trackpad gestures carry no release velocity, so coast from the
+            // windowed pan velocity using the touchpad deceleration.
+            onPointerPanZoomEnd: (_) {
+              _startFling(_panReleaseVelocity(),
+                  decel: _kFlingDecelerationTouchpad);
+              _panSamples.clear();
+            },
             child: GestureDetector(
               supportedDevices: const {PointerDeviceKind.touch},
               behavior: HitTestBehavior.translucent,
@@ -854,6 +965,8 @@ class TerminalViewState extends State<TerminalView>
 
   void _onPointerSignal(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
+    // A live fling shouldn't fight a fresh wheel/trackpad gesture.
+    _stopFling();
     final up = e.scrollDelta.dy < 0;
     if (anyMouse(_grid.modeFlags)) {
       _reportMouse(
@@ -867,8 +980,14 @@ class TerminalViewState extends State<TerminalView>
       }
       return;
     }
-    _engine.scrollBy(
-        up ? widget.scrollMultiplier : -widget.scrollMultiplier);
+    // Smooth, sub-cell scrollback. We intentionally track scrollDelta.dy (the
+    // platform's already-scaled scroll distance, honoring the user's system
+    // scroll-speed setting) rather than a fixed line count — so per-notch travel
+    // varies with the OS, unlike alacritty's fixed `scrolling.multiplier` lines.
+    // scrollMultiplier scales that delta with its historical default (3) as the
+    // neutral 1.0×. down (dy > 0) scrolls toward the live edge = negative engine
+    // delta.
+    _engine.scrollByPixels(-e.scrollDelta.dy * widget.scrollMultiplier / 3.0);
   }
 
   // ---- gesture handlers (touch) ------------------------------------------
@@ -882,16 +1001,10 @@ class TerminalViewState extends State<TerminalView>
   }
 
   void _onVerticalDragEnd(DragEndDetails e) {
-    var v = e.primaryVelocity ?? 0;
-    if (v.abs() < 200) return;
-    _flingTimer = Timer.periodic(const Duration(milliseconds: 16), (t) {
-      v *= 0.92;
-      if (v.abs() < 40) {
-        _stopFling();
-        return;
-      }
-      _touchScrollBy(v * 0.016);
-    });
+    // primaryVelocity is Flutter's smoothed gesture velocity (px/s, downward
+    // positive) — already a multi-sample estimate, so it maps straight onto the
+    // engine's positive-into-history pixel scroll.
+    _startFling(e.primaryVelocity ?? 0);
   }
 
   void _onLongPressStart(LongPressStartDetails e) {

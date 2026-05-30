@@ -62,6 +62,15 @@ Future<void> engineScrollLines({
   delta: delta,
 );
 
+/// Sub-cell pixel scroll. Positive `delta_px` scrolls up into history.
+Future<void> engineScrollPixels({
+  required TerminalEngine engine,
+  required double deltaPx,
+}) => RustLib.instance.api.crateApiTerminalEngineScrollPixels(
+  engine: engine,
+  deltaPx: deltaPx,
+);
+
 Future<void> engineScrollToBottom({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineScrollToBottom(engine: engine);
 

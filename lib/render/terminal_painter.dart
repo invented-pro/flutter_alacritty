@@ -111,6 +111,20 @@ class TerminalPainter extends CustomPainter {
     if (rows == 0 || cols == 0) return;
     glyphs.beginFrame();
 
+    // Sub-cell scroll: shift all content down by `scrollFraction * cellHeight`
+    // and paint one extra row above the top (grid row -1, the overscan line) to
+    // fill the revealed sliver. Clip to the viewport so the shifted top row and
+    // the overflowing bottom row are trimmed. Only engaged when mid-cell, so the
+    // common line-aligned path is untouched.
+    final frac = grid.scrollFraction;
+    final shifted = frac > 0.0;
+    if (shifted) {
+      canvas.save();
+      canvas.clipRect(Rect.fromLTWH(0, 0, size.width, rows * cellHeight));
+      canvas.translate(0, frac * cellHeight);
+    }
+    final firstRow = shifted ? -1 : 0;
+
     // Pass 1: backgrounds (so a wide glyph isn't overwritten by the spacer's bg).
     // No anti-aliasing: cell metrics are sub-pixel (cell_metrics.dart), so AA'd
     // edges on adjacent same-color rects leave half-covered seams between every
@@ -118,7 +132,7 @@ class TerminalPainter extends CustomPainter {
     // when embedded. Solid pixel-aligned fills tile exactly (matches alacritty's
     // background quads). Same reasoning for the selection / cursor fills below.
     final bgPaint = Paint()..isAntiAlias = false;
-    for (var row = 0; row < rows; row++) {
+    for (var row = firstRow; row < rows; row++) {
       final y = row * cellHeight;
       for (var col = 0; col < cols; col++) {
         final flags = grid.flagsAt(row, col);
@@ -148,7 +162,7 @@ class TerminalPainter extends CustomPainter {
     // Pass 2: glyphs / geometry.
     final lineWidth = (cellHeight * 0.08).clamp(1.0, 4.0);
     var needsWarmupFrame = false;
-    for (var row = 0; row < rows; row++) {
+    for (var row = firstRow; row < rows; row++) {
       final y = row * cellHeight;
       for (var col = 0; col < cols; col++) {
         final flags = grid.flagsAt(row, col);
@@ -251,6 +265,7 @@ class TerminalPainter extends CustomPainter {
         canvas.drawRect(bar, Paint()..isAntiAlias = false..color = inkColor);
       }
     }
+    if (shifted) canvas.restore();
   }
 
   @override

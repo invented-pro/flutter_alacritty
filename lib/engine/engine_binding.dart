@@ -22,6 +22,8 @@ abstract class EngineBinding {
   /// Full viewport snapshot with search match flags applied.
   GridUpdate fullSnapshotSearched();
   Future<void> scrollLines(int delta);
+  /// Sub-cell pixel scroll. Positive [deltaPx] scrolls up into history.
+  Future<void> scrollPixels(double deltaPx);
   Future<void> scrollToBottom();
   void clearHistory();
   void reconfigure(EngineConfig config);
@@ -136,6 +138,10 @@ class FrbEngineBinding implements EngineBinding {
       engineScrollLines(engine: _engine, delta: delta);
 
   @override
+  Future<void> scrollPixels(double deltaPx) =>
+      engineScrollPixels(engine: _engine, deltaPx: deltaPx);
+
+  @override
   Future<void> scrollToBottom() => engineScrollToBottom(engine: _engine);
 
   @override
@@ -190,24 +196,36 @@ class FrbEngineBinding implements EngineBinding {
   @override
   void dispose() {}
 
-  GridUpdate _toGridUpdate(RenderUpdate u) => GridUpdate(
-        full: u.full,
-        // rows/columns only matter on a full update (MirrorGrid.apply resizes
-        // only then); a full snapshot has contiguous lines 0..rows-1.
-        rows: u.full ? u.lines.length : 0,
-        columns: (u.full && u.lines.isNotEmpty) ? u.lines.first.cells.length : 0,
-        cursorRow: u.cursorLine,
-        cursorCol: u.cursorCol,
-        cursorVisible: u.cursorVisible,
-        cursorShape: u.cursorShape,
-        cursorBlinking: u.cursorBlinking,
-        modeFlags: u.modeFlags,
-        displayOffset: u.displayOffset,
-        defaultFg: u.defaultFg,
-        defaultBg: u.defaultBg,
-        cursorColor: u.cursorColor,
-        lines: u.lines.map(_lineCells).toList(),
-      );
+  GridUpdate _toGridUpdate(RenderUpdate u) {
+    // A full update appends one trailing overscan row (the line just above the
+    // viewport top) after the screen_lines viewport rows; partial damage has no
+    // overscan. Split it off so the viewport stays exactly screen_lines tall.
+    final hasOverscan = u.full && u.lines.isNotEmpty;
+    final viewportCount = hasOverscan ? u.lines.length - 1 : u.lines.length;
+    final viewport = <LineCells>[
+      for (var i = 0; i < viewportCount; i++) _lineCells(u.lines[i]),
+    ];
+    return GridUpdate(
+      full: u.full,
+      // rows/columns only matter on a full update (MirrorGrid.apply resizes
+      // only then); a full snapshot has contiguous viewport lines 0..rows-1.
+      rows: u.full ? viewportCount : 0,
+      columns: (u.full && u.lines.isNotEmpty) ? u.lines.first.cells.length : 0,
+      cursorRow: u.cursorLine,
+      cursorCol: u.cursorCol,
+      cursorVisible: u.cursorVisible,
+      cursorShape: u.cursorShape,
+      cursorBlinking: u.cursorBlinking,
+      modeFlags: u.modeFlags,
+      displayOffset: u.displayOffset,
+      defaultFg: u.defaultFg,
+      defaultBg: u.defaultBg,
+      cursorColor: u.cursorColor,
+      lines: viewport,
+      scrollFraction: u.scrollFraction,
+      overscan: hasOverscan ? _lineCells(u.lines.last) : null,
+    );
+  }
 
   LineCells _lineCells(LineUpdate l) {
     final n = l.cells.length;

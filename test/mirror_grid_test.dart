@@ -24,6 +24,33 @@ void main() {
     expect(g.codepointAt(0, 2), 'c'.codeUnitAt(0));
   });
 
+  test('scrollFraction + overscan row round-trip through apply', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true, rows: 2, columns: 3,
+      lines: [row(0, 'abc'), row(1, 'def')],
+      cursorRow: 0, cursorCol: 0, cursorVisible: true,
+      scrollFraction: 0.5,
+      overscan: row(2, 'OVR'),
+    ));
+    expect(g.scrollFraction, 0.5);
+    // Overscan is addressable at row -1 for the painter's sliver.
+    expect(g.codepointAt(-1, 0), 'O'.codeUnitAt(0));
+    expect(g.codepointAt(-1, 2), 'R'.codeUnitAt(0));
+    // Viewport stays 2 rows; overscan is not counted.
+    expect(g.rows, 2);
+  });
+
+  test('apply without overscan keeps fraction 0 and blank overscan', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true, rows: 1, columns: 2, lines: [row(0, 'hi')],
+      cursorRow: 0, cursorCol: 0, cursorVisible: true,
+    ));
+    expect(g.scrollFraction, 0.0);
+    expect(g.codepointAt(-1, 0), 32); // blank
+  });
+
   test('initializeEmpty fills cells with the configured default colors', () {
     // Regression: empty rows the engine never sends partial damage for must
     // already carry the configured bg/fg, not a hardcoded default — otherwise

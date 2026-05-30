@@ -11,7 +11,7 @@ import 'fake_binding.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('multiple wheel events in one frame coalesce to one scrollLines',
+  testWidgets('multiple wheel events in one frame coalesce to one scrollPixels',
       (tester) async {
     final binding = FakeBinding();
     final pending = <void Function()>[];
@@ -43,7 +43,9 @@ void main() {
     await tester.pump();
     await Future<void>.value();
 
-    expect(binding.scrollCalls, 1);
-    expect(binding.scrollLinesArgs.single, -15);
+    // Wheel scroll is now sub-cell pixel scroll. dy=120 down → -120 px into the
+    // engine (scrollMultiplier default 3 = neutral 1.0× gain); 5 events coalesce.
+    expect(binding.scrollCalls, 0);
+    expect(binding.scrollPixelsArgs.single, closeTo(-600.0, 1e-9));
   });
 }

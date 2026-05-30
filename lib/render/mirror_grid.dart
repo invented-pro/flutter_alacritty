@@ -42,6 +42,8 @@ class GridUpdate {
     this.defaultFg = 0xD8D8D8,
     this.defaultBg = 0x181818,
     this.cursorColor = 0xFF000000,
+    this.scrollFraction = 0.0,
+    this.overscan,
   });
   final bool full;
   final int rows;
@@ -57,6 +59,14 @@ class GridUpdate {
   final int defaultFg;
   final int defaultBg;
   final int cursorColor;
+
+  /// Sub-cell scroll position in [0.0, 1.0). See [TerminalGridView.scrollFraction].
+  final double scrollFraction;
+
+  /// The line directly above the viewport top, used to fill the sliver revealed
+  /// when [scrollFraction] > 0. Present only on full updates (null on partial
+  /// damage, where the fraction is always 0).
+  final LineCells? overscan;
 }
 
 /// Read-only view of the terminal grid that the engine exposes to consumers.
@@ -82,10 +92,19 @@ abstract class TerminalGridView implements Listenable {
   /// unset — in which case painters keep their inverse-video cursor.
   int get cursorColor;
 
+  /// Sub-cell scroll offset in [0.0, 1.0): how far the viewport is scrolled up
+  /// past a line boundary, in fractions of a cell height. The painter shifts
+  /// content down by `scrollFraction * cellHeight` and fills the revealed top
+  /// sliver with the overscan row (cell `row == -1`). 0.0 on a line boundary.
+  double get scrollFraction;
+
   /// Bumped on every grid mutation. Painters use this to short-circuit
   /// `shouldRepaint`.
   int get generation;
 
+  /// Cell accessors. `row` in `0..rows-1` reads the viewport; `row == -1` reads
+  /// the overscan line (the row just above the viewport top) used to paint the
+  /// [scrollFraction] sliver. Other negative rows are not valid.
   int codepointAt(int row, int col);
   int fgAt(int row, int col);
   int bgAt(int row, int col);
@@ -122,6 +141,14 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   bool _cursorBlinking = false;
   int _modeFlags = 0;
   int _displayOffset = 0;
+  double _scrollFraction = 0;
+  // Overscan line (row -1): the row just above the viewport top, painted in the
+  // sliver revealed when _scrollFraction > 0. Always sized to _columns.
+  Int32List _overCodepoints = Int32List(0);
+  Int32List _overFg = Int32List(0);
+  Int32List _overBg = Int32List(0);
+  Uint16List _overFlags = Uint16List(0);
+  Int32List _overHyperlinkId = Int32List(0);
 
   /// Bumps on every [apply] / [initializeEmpty]; used by [TerminalPainter.shouldRepaint].
   @override
@@ -147,17 +174,22 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   int get displayOffset => _displayOffset;
   @override
   int get cursorColor => _cursorColor;
+  @override
+  double get scrollFraction => _scrollFraction;
 
   @override
-  int codepointAt(int row, int col) => _codepoints[row][col];
+  int codepointAt(int row, int col) =>
+      row < 0 ? _overCodepoints[col] : _codepoints[row][col];
   @override
-  int fgAt(int row, int col) => _fg[row][col];
+  int fgAt(int row, int col) => row < 0 ? _overFg[col] : _fg[row][col];
   @override
-  int bgAt(int row, int col) => _bg[row][col];
+  int bgAt(int row, int col) => row < 0 ? _overBg[col] : _bg[row][col];
   @override
-  int flagsAt(int row, int col) => _flags[row][col];
+  int flagsAt(int row, int col) =>
+      row < 0 ? _overFlags[col] : _flags[row][col];
   @override
-  int hyperlinkIdAt(int row, int col) => _hyperlinkId[row][col];
+  int hyperlinkIdAt(int row, int col) =>
+      row < 0 ? _overHyperlinkId[col] : _hyperlinkId[row][col];
 
   void _ensureSize(int rows, int columns) {
     if (rows == _rows && columns == _columns) return;
@@ -168,6 +200,11 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
     _bg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, _defaultBg));
     _flags = List.generate(rows, (_) => Uint16List(columns));
     _hyperlinkId = List.generate(rows, (_) => Int32List(columns));
+    _overCodepoints = Int32List(columns)..fillRange(0, columns, 32);
+    _overFg = Int32List(columns)..fillRange(0, columns, _defaultFg);
+    _overBg = Int32List(columns)..fillRange(0, columns, _defaultBg);
+    _overFlags = Uint16List(columns);
+    _overHyperlinkId = Int32List(columns);
   }
 
   /// Empty viewport for startup — avoids a sync full_snapshot FFI round-trip.
@@ -201,6 +238,26 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
       _flags[l.line].setRange(0, copy, l.flags);
       _hyperlinkId[l.line].setRange(0, copy, l.hyperlinkId);
     }
+    // Overscan row only arrives on full updates; partial damage always carries
+    // scrollFraction 0 (engine forces a full snapshot whenever it's non-zero),
+    // so the row-(-1) data the painter reads is never stale while visible.
+    final o = u.overscan;
+    if (o != null) {
+      final copy = o.codepoints.length < _columns ? o.codepoints.length : _columns;
+      _overCodepoints.fillRange(0, _columns, 32);
+      _overFg.fillRange(0, _columns, _defaultFg);
+      _overBg.fillRange(0, _columns, _defaultBg);
+      _overFlags.fillRange(0, _columns, 0);
+      _overHyperlinkId.fillRange(0, _columns, 0);
+      if (copy > 0) {
+        _overCodepoints.setRange(0, copy, o.codepoints);
+        _overFg.setRange(0, copy, o.fg);
+        _overBg.setRange(0, copy, o.bg);
+        _overFlags.setRange(0, copy, o.flags);
+        _overHyperlinkId.setRange(0, copy, o.hyperlinkId);
+      }
+    }
+    _scrollFraction = u.scrollFraction;
     _cursorRow = u.cursorRow;
     _cursorCol = u.cursorCol;
     _cursorVisible = u.cursorVisible;

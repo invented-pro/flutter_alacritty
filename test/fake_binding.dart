@@ -12,6 +12,7 @@ import 'package:flutter_alacritty/src/rust/engine.dart';
 class FakeBinding implements RewireableEngineBinding {
   int scrollCalls = 0;
   final List<int> scrollLinesArgs = [];
+  final List<double> scrollPixelsArgs = [];
   int selStartCalls = 0;
   int selClearCalls = 0;
   int scrollToBottomCalls = 0;
@@ -162,6 +163,10 @@ class FakeBinding implements RewireableEngineBinding {
   Future<void> scrollLines(int delta) async {
     scrollCalls++;
     scrollLinesArgs.add(delta);
+  }
+  @override
+  Future<void> scrollPixels(double deltaPx) async {
+    scrollPixelsArgs.add(deltaPx);
   }
   @override
   Future<void> scrollToBottom() async {

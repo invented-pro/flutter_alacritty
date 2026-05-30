@@ -28,6 +28,15 @@ class _CountingFakeBinding implements EngineBinding {
     scrollLinesArgs.add(delta);
   }
 
+  int scrollPixelsCalls = 0;
+  final List<double> scrollPixelsArgs = [];
+
+  @override
+  Future<void> scrollPixels(double deltaPx) async {
+    scrollPixelsCalls++;
+    scrollPixelsArgs.add(deltaPx);
+  }
+
   @override
   GridUpdate fullSnapshotSearched() {
     snapshotCalls++;
@@ -105,6 +114,30 @@ void main() {
 
     expect(binding.scrollLinesCalls, 1);
     expect(binding.scrollLinesArgs.single, 5);
+    expect(binding.snapshotCalls, 1);
+  });
+
+  test('multiple scheduleScrollByPixels in one tick → 1 FFI scrollPixels',
+      () async {
+    final binding = _CountingFakeBinding();
+    final grid = MirrorGrid();
+    late void Function() pending;
+    final client = TerminalEngineClient(
+      binding: binding,
+      grid: grid,
+      schedule: (cb) => pending = cb,
+    );
+
+    client.scheduleScrollByPixels(4.5);
+    client.scheduleScrollByPixels(3.0);
+    client.scheduleScrollByPixels(-1.5);
+    expect(binding.scrollPixelsCalls, 0);
+
+    pending();
+    await Future<void>.value();
+
+    expect(binding.scrollPixelsCalls, 1);
+    expect(binding.scrollPixelsArgs.single, closeTo(6.0, 1e-9));
     expect(binding.snapshotCalls, 1);
   });
 

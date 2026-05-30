@@ -199,6 +199,12 @@ class TerminalEngine {
   /// use [scrollLines] / [scrollToBottom].
   void scrollBy(int delta) => _client?.scheduleScrollBy(delta);
 
+  /// Fire-and-forget sub-cell pixel scroll for smooth wheel / trackpad / fling
+  /// input. Positive [deltaPx] scrolls up into history. Coalesces per frame like
+  /// [scrollBy]; the engine tracks the fractional offset and exposes it on the
+  /// grid as `scrollFraction` for the painter.
+  void scrollByPixels(double deltaPx) => _client?.scheduleScrollByPixels(deltaPx);
+
   Future<void> scrollToBottom() async {
     await _client?.scrollToBottom();
   }

@@ -209,7 +209,8 @@ void main() {
       kind: PointerDeviceKind.touch,
     );
     await tester.pump();
-    expect(binding.scrollCalls, greaterThan(0));
+    // Scrollback drag now uses sub-cell pixel scroll, not whole-line scroll.
+    expect(binding.scrollPixelsArgs, isNotEmpty);
     title.dispose();
   });
 

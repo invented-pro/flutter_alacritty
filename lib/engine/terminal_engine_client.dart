@@ -37,6 +37,7 @@ class TerminalEngineClient {
   int? _pendingColumns;
   int? _pendingRows;
   int _pendingScrollDelta = 0;
+  double _pendingScrollPixels = 0;
   bool _scrollScheduled = false;
   bool _scrollApplying = false;
   bool _disposed = false;
@@ -160,11 +161,23 @@ class TerminalEngineClient {
     _ensureScrollScheduled();
   }
 
+  /// Coalesced sub-cell pixel scroll (smooth wheel / trackpad / fling). Positive
+  /// [deltaPx] scrolls up into history. Aggregates with [scheduleScrollBy] into a
+  /// single per-frame flush. See [scheduleScrollBy] for the scheduling model.
+  void scheduleScrollByPixels(double deltaPx) {
+    if (deltaPx == 0 || _disposed) return;
+    _pendingScrollPixels += deltaPx;
+    _ensureScrollScheduled();
+  }
+
+  bool get _hasPendingScroll =>
+      _pendingScrollDelta != 0 || _pendingScrollPixels != 0;
+
   /// Schedules a single post-frame [_applyPendingScroll] when scroll is pending
   /// and none is already queued. Idempotent — safe to call from
   /// [scheduleScrollBy] and from a flush's `finally`.
   void _ensureScrollScheduled() {
-    if (_disposed || _scrollScheduled || _pendingScrollDelta == 0) return;
+    if (_disposed || _scrollScheduled || !_hasPendingScroll) return;
     _scrollScheduled = true;
     _schedule(() => _applyPendingScroll());
   }
@@ -180,12 +193,19 @@ class TerminalEngineClient {
   /// [_scrollScheduled] stuck true and no callback queued).
   Future<void> _applyPendingScroll() async {
     _scrollScheduled = false;
-    if (_disposed || _pendingScrollDelta == 0 || _scrollApplying) return;
+    if (_disposed || !_hasPendingScroll || _scrollApplying) return;
     final delta = _pendingScrollDelta;
+    final pixels = _pendingScrollPixels;
     _pendingScrollDelta = 0;
+    _pendingScrollPixels = 0;
     _scrollApplying = true;
     try {
-      await _binding.scrollLines(delta);
+      // Apply discrete line scroll first (it resets the engine's sub-cell
+      // fraction), then the pixel delta rebuilds the fraction on top — so a
+      // pixel scroll coalesced with a line scroll in the same frame still lands
+      // at the right sub-cell offset rather than being snapped away after.
+      if (delta != 0) await _binding.scrollLines(delta);
+      if (pixels != 0) await _binding.scrollPixels(pixels);
       if (!_disposed) refreshView();
     } finally {
       _scrollApplying = false;

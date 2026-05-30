@@ -119,6 +119,13 @@ class RenderUpdate {
   final int defaultBg;
   final int cursorColor;
 
+  /// Sub-cell scroll position in [0.0, 1.0): how far, in fractions of a cell
+  /// height, the viewport is scrolled up past `display_offset`. The painter
+  /// shifts content DOWN by `scroll_fraction * cell_height` and fills the
+  /// revealed top sliver with the overscan row (the last entry in `lines` on
+  /// a full update). 0.0 when sitting on a line boundary.
+  final double scrollFraction;
+
   const RenderUpdate({
     required this.lines,
     required this.full,
@@ -132,6 +139,7 @@ class RenderUpdate {
     required this.defaultFg,
     required this.defaultBg,
     required this.cursorColor,
+    required this.scrollFraction,
   });
 
   @override
@@ -147,7 +155,8 @@ class RenderUpdate {
       displayOffset.hashCode ^
       defaultFg.hashCode ^
       defaultBg.hashCode ^
-      cursorColor.hashCode;
+      cursorColor.hashCode ^
+      scrollFraction.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -165,5 +174,6 @@ class RenderUpdate {
           displayOffset == other.displayOffset &&
           defaultFg == other.defaultFg &&
           defaultBg == other.defaultBg &&
-          cursorColor == other.cursorColor;
+          cursorColor == other.cursorColor &&
+          scrollFraction == other.scrollFraction;
 }
