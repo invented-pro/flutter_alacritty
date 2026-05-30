@@ -95,6 +95,8 @@ class ImeSession implements TextInputClient {
   @override
   void connectionClosed() => detach();
   @override
+  bool onFocusReceived() => false;
+  @override
   void didChangeInputControl(TextInputControl? old, TextInputControl? n) {}
   @override
   void insertTextPlaceholder(Size size) {}
