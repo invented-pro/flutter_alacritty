@@ -225,6 +225,13 @@ class TerminalEngine {
   void initializeEmpty(int rows, int columns) =>
       _grid.initializeEmpty(rows, columns);
 
+  /// Awaits pending PTY batches. Use in tests before reading [grid].
+  @visibleForTesting
+  Future<void> drainForTest() async {
+    _ensureBound();
+    await _client?.drainForTest();
+  }
+
   void dispose() {
     if (_disposed) return;
     _disposed = true;

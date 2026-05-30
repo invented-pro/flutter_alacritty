@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../render/mirror_grid.dart';
@@ -204,6 +205,20 @@ class TerminalEngineClient {
 
   /// Drain terminal→host events synchronously (e.g. OSC 52 paste reply).
   void pumpEventsNow() => _binding.pumpEvents();
+
+  /// Runs any pending PTY ingest immediately. For unit/widget tests that do not
+  /// pump frames (the default [schedule] uses post-frame callbacks).
+  @visibleForTesting
+  Future<void> drainForTest() async {
+    while (_buf.isNotEmpty || _drainScheduled || _advancing) {
+      if (_drainScheduled || _buf.isNotEmpty) {
+        await _drain();
+      } else {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+    await _applyPendingScroll();
+  }
 
   void dispose() {
     _disposed = true;
