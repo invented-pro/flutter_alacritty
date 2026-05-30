@@ -70,6 +70,8 @@ void main() {
       required void Function() onBell,
       required void Function(String) onClipboard,
       required void Function() onClipboardLoad,
+        required void Function(String) onWorkingDir,
+        required void Function(String) onNotify,
       required engineConfig,
     }) {
       binding = FakeBinding();

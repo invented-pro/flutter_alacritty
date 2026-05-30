@@ -98,6 +98,8 @@ class FakeBinding implements RewireableEngineBinding {
   void Function()? onBell;
   void Function(String)? onClipboard;
   void Function()? onClipboardLoad;
+  void Function(String)? onWorkingDir;
+  void Function(String)? onNotify;
 
   String? lastClipboardLoadText;
   int? lastCellWidth;
@@ -139,6 +141,10 @@ class FakeBinding implements RewireableEngineBinding {
           onClipboard?.call(payload as String);
         case 'clipboard_load':
           onClipboardLoad?.call();
+        case 'working_dir':
+          onWorkingDir?.call(payload as String);
+        case 'notify':
+          onNotify?.call(payload as String);
         default:
           throw StateError(
               'FakeBinding.pumpEvents: unknown event kind: $kind');

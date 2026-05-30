@@ -1127,6 +1127,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return EngineEvent_ClipboardStore(dco_decode_String(raw[1]));
       case 5:
         return EngineEvent_ClipboardLoad();
+      case 6:
+        return EngineEvent_WorkingDir(dco_decode_String(raw[1]));
+      case 7:
+        return EngineEvent_Notify(dco_decode_String(raw[1]));
       default:
         throw Exception("unreachable");
     }
@@ -1370,6 +1374,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return EngineEvent_ClipboardStore(var_field0);
       case 5:
         return EngineEvent_ClipboardLoad();
+      case 6:
+        var var_field0 = sse_decode_String(deserializer);
+        return EngineEvent_WorkingDir(var_field0);
+      case 7:
+        var var_field0 = sse_decode_String(deserializer);
+        return EngineEvent_Notify(var_field0);
       default:
         throw UnimplementedError('');
     }
@@ -1630,6 +1640,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(field0, serializer);
       case EngineEvent_ClipboardLoad():
         sse_encode_i_32(5, serializer);
+      case EngineEvent_WorkingDir(field0: final field0):
+        sse_encode_i_32(6, serializer);
+        sse_encode_String(field0, serializer);
+      case EngineEvent_Notify(field0: final field0):
+        sse_encode_i_32(7, serializer);
+        sse_encode_String(field0, serializer);
     }
   }
 

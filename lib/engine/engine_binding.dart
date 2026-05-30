@@ -49,6 +49,8 @@ abstract class RewireableEngineBinding implements EngineBinding {
   set onBell(void Function()? cb);
   set onClipboard(void Function(String)? cb);
   set onClipboardLoad(void Function()? cb);
+  set onWorkingDir(void Function(String)? cb);
+  set onNotify(void Function(String)? cb);
 }
 
 /// FRB-backed binding. Owns the engine handle, translates FRB [RenderUpdate]
@@ -62,6 +64,8 @@ class FrbEngineBinding implements EngineBinding {
     required this.onBell,
     required this.onClipboard,
     required this.onClipboardLoad,
+    required this.onWorkingDir,
+    required this.onNotify,
     required EngineConfig engineConfig,
   }) : _engine = engineNew(columns: columns, rows: rows, config: engineConfig);
 
@@ -71,6 +75,8 @@ class FrbEngineBinding implements EngineBinding {
   final void Function() onBell;
   final void Function(String) onClipboard;
   final void Function() onClipboardLoad;
+  final void Function(String) onWorkingDir;
+  final void Function(String) onNotify;
 
   @override
   Future<void> advance(Uint8List bytes) => engineAdvance(engine: _engine, bytes: bytes);
@@ -98,6 +104,10 @@ class FrbEngineBinding implements EngineBinding {
         onClipboard(e.field0);
       } else if (e is EngineEvent_ClipboardLoad) {
         onClipboardLoad();
+      } else if (e is EngineEvent_WorkingDir) {
+        onWorkingDir(e.field0);
+      } else if (e is EngineEvent_Notify) {
+        onNotify(e.field0);
       }
     }
   }

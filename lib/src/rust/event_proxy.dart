@@ -19,4 +19,10 @@ sealed class EngineEvent with _$EngineEvent {
   const factory EngineEvent.clipboardStore(String field0) =
       EngineEvent_ClipboardStore;
   const factory EngineEvent.clipboardLoad() = EngineEvent_ClipboardLoad;
+
+  /// OSC 7: current working directory (file://host/path).
+  const factory EngineEvent.workingDir(String field0) = EngineEvent_WorkingDir;
+
+  /// OSC 9 / OSC 777: desktop notification (body, or "title\0body" for 777).
+  const factory EngineEvent.notify(String field0) = EngineEvent_Notify;
 }

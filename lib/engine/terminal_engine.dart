@@ -28,6 +28,8 @@ typedef EngineFactory = EngineBinding Function({
   required void Function() onBell,
   required void Function(String) onClipboard,
   required void Function() onClipboardLoad,
+  required void Function(String) onWorkingDir,
+  required void Function(String) onNotify,
   required EngineConfig engineConfig,
 });
 
@@ -84,7 +86,10 @@ class TerminalEngine {
       StreamController<String>.broadcast();
   final StreamController<void> _clipboardLoadCtl =
       StreamController<void>.broadcast();
+  final StreamController<String> _notifyCtl =
+      StreamController<String>.broadcast();
   final ValueNotifier<String> _title = ValueNotifier<String>('flutter_alacritty');
+  final ValueNotifier<String> _workingDir = ValueNotifier<String>('');
 
   TerminalEngineClient? _client;
   EngineBinding? _binding;
@@ -104,8 +109,16 @@ class TerminalEngine {
   /// [respondClipboardLoad]).
   Stream<void> get clipboardLoad => _clipboardLoadCtl.stream;
 
+  /// One event per OSC 9 / OSC 777 desktop notification.
+  /// Payload is either the notification body (OSC 9) or "title\0body" (OSC 777).
+  Stream<String> get notify => _notifyCtl.stream;
+
   /// Current terminal title. Updated on `Event::Title` and `Event::ResetTitle`.
   ValueListenable<String> get title => _title;
+
+  /// Current working directory reported via OSC 7 (`file://host/path`).
+  /// Updated each time the shell emits an OSC 7 sequence.
+  ValueListenable<String> get workingDir => _workingDir;
 
   /// Listenable for external consumers who want to drive a
   /// `CustomPaint(repaint: ...)` directly. The in-package `TerminalView`
@@ -242,6 +255,8 @@ class TerminalEngine {
     _bellCtl.close();
     _clipboardCtl.close();
     _clipboardLoadCtl.close();
+    _notifyCtl.close();
+    _workingDir.dispose();
   }
 
   // ---- internals -----------------------------------------------------------
@@ -263,6 +278,8 @@ class TerminalEngine {
       onBell: _onBell,
       onClipboard: _onClipboard,
       onClipboardLoad: _onClipboardLoad,
+      onWorkingDir: _onWorkingDir,
+      onNotify: _onNotify,
       engineConfig: _config.engineConfig,
     );
     _bindEager(binding);
@@ -294,6 +311,8 @@ class TerminalEngine {
       binding.onBell = _onBell;
       binding.onClipboard = _onClipboard;
       binding.onClipboardLoad = _onClipboardLoad;
+      binding.onWorkingDir = _onWorkingDir;
+      binding.onNotify = _onNotify;
     }
   }
 
@@ -320,5 +339,15 @@ class TerminalEngine {
   void _onClipboardLoad() {
     if (_disposed || _clipboardLoadCtl.isClosed) return;
     _clipboardLoadCtl.add(null);
+  }
+
+  void _onWorkingDir(String dir) {
+    if (_disposed) return;
+    _workingDir.value = dir;
+  }
+
+  void _onNotify(String msg) {
+    if (_disposed || _notifyCtl.isClosed) return;
+    _notifyCtl.add(msg);
   }
 }
