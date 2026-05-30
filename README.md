@@ -120,6 +120,12 @@ This repo ships **two** packages:
 
 See [PUBLISHING.md](PUBLISHING.md) for the full checklist.
 
+## Projects using this library
+
+| Project | Description |
+|---------|-------------|
+| [**TeamPilot**](https://github.com/hhoao/teampilot) | Desktop client for terminal AI agent teams: per-member embedded terminals (local PTY or SSH), team/model configuration, and a multi-tab chat workbench. Built on `flutter_alacritty` for rendering. |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
