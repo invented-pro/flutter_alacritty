@@ -12,11 +12,13 @@ import 'package:flutter/services.dart'
         KeyDownEvent,
         KeyEvent,
         KeyRepeatEvent,
+        LogicalKeyboardKey,
         SystemSound,
         SystemSoundType;
 
 import '../controller/terminal_controller.dart';
 import '../engine/terminal_engine.dart';
+import '../input/ime_key_routing.dart';
 import '../input/ime_session.dart';
 import '../input/key_input.dart';
 import '../input/mouse_input.dart';
@@ -204,6 +206,7 @@ class TerminalViewState extends State<TerminalView>
   late final ImeSession _ime = ImeSession(
     onCommit: _writeCommittedText,
     onPreeditChanged: _onPreeditChanged,
+    onBackspace: _onImeBackspace,
   );
   Rect? _lastReportedCaretRect;
 
@@ -423,13 +426,17 @@ class TerminalViewState extends State<TerminalView>
         return KeyEventResult.handled;
       }
     }
-    if (_ime.isAttached &&
-        _ime.isComposing &&
-        event.character != null &&
-        event.character!.isNotEmpty &&
-        !hw.isControlPressed &&
-        !hw.isAltPressed &&
-        !hw.isMetaPressed) {
+    // Alacritty `input/keyboard.rs`: while `display.ime.preedit()` is set, key_input
+    // returns immediately — Backspace/arrows/printables stay with the OS IME, not
+    // the PTY. Shortcuts above still run (Ctrl+Shift+C, etc.).
+    if (_ime.isComposing) {
+      return KeyEventResult.ignored;
+    }
+    if (ImeKeyRouting.isDeferrablePrintableKeyEvent(event, hw) &&
+        ImeKeyRouting.shouldDeferPrintableToTextInput(
+          imeAttached: _ime.isAttached,
+          imeComposing: false,
+        )) {
       return KeyEventResult.ignored;
     }
     final bytes = encodeKey(
@@ -491,6 +498,8 @@ class TerminalViewState extends State<TerminalView>
 
   void _handleImeFocusChange() {
     if (_focus.hasFocus) {
+      // Route hardware keys through TextInput on macOS/Windows IME (xterm parity).
+      _focus.consumeKeyboardToken();
       _ime.attach();
     } else {
       _ime.detach();
@@ -506,7 +515,24 @@ class TerminalViewState extends State<TerminalView>
 
   void _writeCommittedText(String t) {
     if (t.isEmpty) return;
+    _onTerminalInputStart();
     _writeToEngine(Uint8List.fromList(utf8.encode(t)));
+  }
+
+  void _onImeBackspace() {
+    final hw = HardwareKeyboard.instance;
+    final bytes = encodeKey(
+      LogicalKeyboardKey.backspace,
+      null,
+      shift: hw.isShiftPressed,
+      alt: hw.isAltPressed,
+      ctrl: hw.isControlPressed,
+      meta: hw.isMetaPressed,
+      modeFlags: _grid.modeFlags,
+    );
+    if (bytes == null) return;
+    _onTerminalInputStart();
+    _writeToEngine(bytes);
   }
 
   void _reportCaretRectToIme() {
@@ -525,7 +551,11 @@ class TerminalViewState extends State<TerminalView>
         renderBox.localToGlobal(localRect.topLeft) & localRect.size;
     if (globalRect == _lastReportedCaretRect) return;
     _lastReportedCaretRect = globalRect;
-    _ime.setCaretRect(globalRect);
+    _ime.setImeGeometry(
+      editableSize: renderBox.size,
+      editableTransform: renderBox.getTransformTo(null),
+      globalCaret: globalRect,
+    );
   }
 
   (int, int, bool) _cellAt(Offset local) {

@@ -2,25 +2,39 @@ import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/services.dart';
 
+/// Sentinel editing state so macOS/Windows TextInput can signal Backspace via
+/// a shrinking field (xterm [CustomTextEdit] delete-detection parity).
+const TextEditingValue kImeDeleteDetectionBaseline = TextEditingValue(
+  text: '  ',
+  selection: TextSelection.collapsed(offset: 2),
+);
+
 /// Owns the platform TextInput connection for the terminal view. Parses
-/// `updateEditingValue` into two events the rest of the app cares about:
+/// `updateEditingValue` into events the rest of the app cares about:
 ///
 ///   onPreeditChanged(String?) — the current composing substring (null = no
 ///     active preedit; the overlay should hide).
 ///   onCommit(String)         — a finalized string the terminal should write
 ///     to the PTY as UTF-8 bytes.
+///   onBackspace()            — delete key while the TextInput buffer shrinks.
 ///
-/// Per-frame, the caller should pass the cursor's global rect via
-/// [setCaretRect] so the OS IM (fcitx / IBus / etc.) positions its candidate
-/// window adjacent to the cursor cell.
+/// Per-frame, the caller should pass cursor geometry via [setImeGeometry] so
+/// the OS IM (fcitx / IBus / macOS IME / etc.) positions its candidate window
+/// adjacent to the cursor cell.
 class ImeSession implements TextInputClient {
-  ImeSession({required this.onCommit, required this.onPreeditChanged});
+  ImeSession({
+    required this.onCommit,
+    required this.onPreeditChanged,
+    required this.onBackspace,
+  });
 
   final void Function(String text) onCommit;
   final void Function(String? preedit) onPreeditChanged;
+  final void Function() onBackspace;
 
   TextInputConnection? _conn;
   bool _composing = false;
+  TextEditingValue _editing = kImeDeleteDetectionBaseline;
 
   bool get isAttached => _conn != null && _conn!.attached;
 
@@ -43,10 +57,11 @@ class ImeSession implements TextInputClient {
         enableSuggestions: false,
         smartDashesType: SmartDashesType.disabled,
         smartQuotesType: SmartQuotesType.disabled,
+        enableIMEPersonalizedLearning: false,
         viewId: viewId,
       ),
     );
-    _conn!.setEditingState(TextEditingValue.empty);
+    _resetEditing(notify: false);
     _conn!.show();
   }
 
@@ -60,17 +75,29 @@ class ImeSession implements TextInputClient {
     _conn = null;
   }
 
-  /// Tell the platform IM where the cursor is (global coordinates) so its
-  /// candidate window can position next to it.
-  void setCaretRect(Rect globalCaret) {
+  /// Positions the platform IME: editable bounds + caret (global coordinates).
+  void setImeGeometry({
+    required Size editableSize,
+    required Matrix4 editableTransform,
+    required Rect globalCaret,
+  }) {
     if (!isAttached) return;
+    _conn!.setEditableSizeAndTransform(editableSize, editableTransform);
     _conn!.setCaretRect(globalCaret);
+  }
+
+  void _resetEditing({bool notify = true}) {
+    _editing = kImeDeleteDetectionBaseline;
+    _composing = false;
+    _conn?.setEditingState(_editing);
+    if (notify) onPreeditChanged(null);
   }
 
   // TextInputClient ----------------------------------------------------------
 
   @override
   void updateEditingValue(TextEditingValue value) {
+    _editing = value;
     final composing = value.composing;
     if (composing.isValid && !composing.isCollapsed) {
       _composing = true;
@@ -78,15 +105,36 @@ class ImeSession implements TextInputClient {
       return;
     }
     _composing = false;
-    if (value.text.isNotEmpty) {
-      onCommit(value.text);
-      _conn?.setEditingState(TextEditingValue.empty);
-    }
     onPreeditChanged(null);
+
+    final baseline = kImeDeleteDetectionBaseline.text;
+    if (value.text.length < baseline.length) {
+      if (value.text.isNotEmpty && baseline.startsWith(value.text)) {
+        onBackspace();
+      } else if (value.text.isNotEmpty) {
+        // Some IMEs commit without the sentinel prefix (e.g. lone CJK).
+        onCommit(value.text);
+      }
+      _resetEditing(notify: false);
+      return;
+    }
+
+    if (value.text.length > baseline.length) {
+      final delta = value.text.substring(baseline.length);
+      if (delta.isNotEmpty) onCommit(delta);
+      _resetEditing(notify: false);
+      return;
+    }
+
+    if (value.text.isNotEmpty && value.text != baseline) {
+      onCommit(value.text);
+      _resetEditing(notify: false);
+    }
   }
 
   @override
-  TextEditingValue? get currentTextEditingValue => TextEditingValue.empty;
+  TextEditingValue? get currentTextEditingValue => _editing;
+
   @override
   AutofillScope? get currentAutofillScope => null;
   @override
@@ -94,7 +142,12 @@ class ImeSession implements TextInputClient {
   @override
   void insertContent(KeyboardInsertedContent content) {}
   @override
-  void performPrivateCommand(String action, Map<String, dynamic> data) {}
+  void performPrivateCommand(String action, Map<String, dynamic> data) {
+    if (action == 'deleteBackward' || action == 'deleteWordBackward') {
+      onBackspace();
+      _resetEditing(notify: false);
+    }
+  }
   @override
   void updateFloatingCursor(RawFloatingCursorPoint point) {}
   @override
@@ -112,5 +165,10 @@ class ImeSession implements TextInputClient {
   @override
   void showToolbar() {}
   @override
-  void performSelector(String selectorName) {}
+  void performSelector(String selectorName) {
+    if (selectorName == 'deleteBackward:') {
+      onBackspace();
+      _resetEditing(notify: false);
+    }
+  }
 }

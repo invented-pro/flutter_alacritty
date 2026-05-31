@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert' show utf8;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -588,6 +589,66 @@ void main() {
     title.dispose();
   });
 
+  testWidgets(
+      'macOS: printable key deferred while IME attached but not composing',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final title = ValueNotifier<String>('t');
+      final pty = _FakePty();
+      await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+        title: title,
+        ptyFactory: ({required rows, required columns}) => pty,
+        engineFactory: ({
+          required columns, required rows,
+          required onPtyWrite, required onTitle,
+          required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
+        }) => FakeBinding(),
+      )));
+      await tester.pump();
+      await tester.tap(find.byType(CustomPaint).first);
+      await tester.pump();
+      final state = tester.state<State<TerminalView>>(find.byType(TerminalView));
+      final ime = (state as dynamic).imeForTest as ImeSession;
+      expect(ime.isAttached, isTrue);
+      expect(ime.isComposing, isFalse);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(pty.writes, isEmpty,
+          reason: 'macOS defers uncomposed printables to TextInput for IME');
+      title.dispose();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('macOS: Backspace reaches PTY while IME attached', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final title = ValueNotifier<String>('t');
+      final pty = _FakePty();
+      await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+        title: title,
+        ptyFactory: ({required rows, required columns}) => pty,
+        engineFactory: ({
+          required columns, required rows,
+          required onPtyWrite, required onTitle,
+          required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
+        }) => FakeBinding(),
+      )));
+      await tester.pump();
+      await tester.tap(find.byType(CustomPaint).first);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await tester.pump();
+      final bytes = pty.writes.expand((e) => e).toList();
+      expect(bytes, [0x7f], reason: 'Backspace must encode DEL, not defer to IME');
+      title.dispose();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   testWidgets('ASCII with IME attached but not composing reaches the PTY via encodeKey',
       (tester) async {
     final title = ValueNotifier<String>('t');
@@ -684,6 +745,11 @@ void main() {
     await tester.pump();
     expect(pty.writes, isEmpty,
         reason: 'TextInput delivers printable characters; encodeKey path must NOT fire');
+    // Backspace during preedit must not send DEL (Alacritty blocks all keys while preedit).
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pump();
+    expect(pty.writes, isEmpty,
+        reason: 'Backspace during IME preedit stays with the platform IM');
     // Ctrl+Shift+C: copies selection via the existing hotkey branch — should NOT be swallowed.
     // (Selection is empty so the copy is a no-op as far as the PTY is concerned, but the branch
     // returns KeyEventResult.handled — which is enough to prove the gate didn't intercept.)
