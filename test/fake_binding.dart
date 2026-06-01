@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/engine_binding.dart';
 import 'package:flutter_alacritty/render/cell_flags.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
@@ -143,7 +144,7 @@ class FakeBinding implements RewireableEngineBinding {
         case 'title':
           onTitle?.call(payload as String);
         case 'reset_title':
-          onTitle?.call('flutter_alacritty');
+          onTitle?.call(kDefaultTerminalTitle);
         case 'bell':
           onBell?.call();
         case 'clipboard':

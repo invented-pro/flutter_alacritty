@@ -77,7 +77,7 @@ void main() {
     binding.pendingEvents.add(('reset_title', null));
     h.engine.feed(Uint8List.fromList([2]));
     await h.drain();
-    expect(h.engine.title.value, 'flutter_alacritty');
+    expect(h.engine.title.value, kDefaultTerminalTitle);
 
     h.engine.dispose();
   });

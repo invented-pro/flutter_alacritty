@@ -55,12 +55,10 @@ void main() {
       required engineConfig,
     }) => FakeBinding();
 
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: ValueNotifier('t'),
         ptyFactory: ptyFactory,
         engineFactory: engineFactory,
-      ),
     ));
     await tester.pumpAndSettle();
     expect(ptys.length, 1);
@@ -78,12 +76,10 @@ void main() {
   testWidgets('spawn failure shows the error overlay', (tester) async {
     PtyBackend boom({required int rows, required int columns}) =>
         throw StateError('no shell');
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: ValueNotifier('t'),
         ptyFactory: boom,
         engineFactory: ({required columns, required rows, required onPtyWrite, required onTitle, required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig}) => FakeBinding(),
-      ),
     ));
     await tester.pumpAndSettle();
     expect(find.textContaining('failed to start'), findsOneWidget);
@@ -91,8 +87,7 @@ void main() {
 
   testWidgets('window background comes from config', (tester) async {
     final title = ValueNotifier<String>('t');
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         config: TerminalConfig.defaults()
             .copyWith(colors: TerminalConfig.defaults().colors.copyWith(background: 0x102030)),
@@ -109,7 +104,6 @@ void main() {
         required void Function(String) onNotify,
           required engineConfig,
         }) => FakeBinding(),
-      ),
     ));
     await tester.pump();
     final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
@@ -119,8 +113,7 @@ void main() {
 
   testWidgets('invalid regex shows error indicator in search bar', (tester) async {
     final title = ValueNotifier<String>('t');
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -128,7 +121,6 @@ void main() {
           required onPtyWrite, required onTitle,
           required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
         }) => FakeBinding(),
-      ),
     ));
     await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -145,8 +137,7 @@ void main() {
 
   testWidgets('Ctrl+Shift+F toggles the search bar', (tester) async {
     final title = ValueNotifier<String>('t');
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -154,7 +145,6 @@ void main() {
           required onPtyWrite, required onTitle,
           required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
         }) => FakeBinding(),
-      ),
     ));
     await tester.pumpAndSettle();
     // Bar is always mounted (Offstage prewarm); visibility tracked via its
@@ -185,8 +175,7 @@ void main() {
   testWidgets('one-finger drag scrolls', (tester) async {
     final title = ValueNotifier<String>('t');
     final binding = FakeBinding();
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -201,7 +190,6 @@ void main() {
         required void Function(String) onNotify,
           required engineConfig,
         }) => binding,
-      ),
     ));
     await tester.pump();
     await tester.drag(
@@ -218,8 +206,7 @@ void main() {
   testWidgets('tap clears selection when one is active; no-op when not', (tester) async {
     final title = ValueNotifier<String>('t');
     var clears = 0;
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -234,7 +221,6 @@ void main() {
         required void Function(String) onNotify,
           required engineConfig,
         }) => ClearOnTapBinding(() => clears++),
-      ),
     ));
     await tester.pump();
     // First tap with no active selection: must NOT call selectionClear (gated;
@@ -256,8 +242,7 @@ void main() {
   testWidgets('long-press selects', (tester) async {
     final title = ValueNotifier<String>('t');
     final binding = FakeBinding();
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -272,7 +257,6 @@ void main() {
         required void Function(String) onNotify,
           required engineConfig,
         }) => binding,
-      ),
     ));
     await tester.pump();
     final center = tester.getCenter(find.byType(CustomPaint).first);
@@ -288,8 +272,7 @@ void main() {
       ..hyperlinkAt[(0, 0)] = 5
       ..hyperlinkUris[5] = 'https://example.com';
     String? launched;
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -308,7 +291,6 @@ void main() {
           launched = u;
           return true;
         },
-      ),
     ));
     await tester.pump();
     final pos = tester.getTopLeft(find.byType(CustomPaint).first) + const Offset(2, 2);
@@ -328,7 +310,7 @@ void main() {
   testWidgets('Ctrl+= increases cellHeight, Ctrl+0 restores', (tester) async {
     final title = ValueNotifier<String>('t');
     final binding = FakeBinding();
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => _FakePty(),
       engineFactory: ({
@@ -336,7 +318,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => binding,
-    )));
+    ));
     await tester.pump();
     double cellH() {
       for (final paint in tester.widgetList<CustomPaint>(find.byType(CustomPaint))) {
@@ -374,8 +356,7 @@ void main() {
   testWidgets('plain right-click opens context menu with Copy/Paste/Search',
       (tester) async {
     final title = ValueNotifier<String>('t');
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -390,7 +371,6 @@ void main() {
         required void Function(String) onNotify,
           required engineConfig,
         }) => FakeBinding(),
-      ),
     ));
     await tester.pump();
     final center = tester.getCenter(find.byType(CustomPaint).first);
@@ -410,8 +390,7 @@ void main() {
   testWidgets('_flashBell with duration > 0 starts the bell animation',
       (tester) async {
     final title = ValueNotifier<String>('t');
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         config: TerminalConfig.defaults().copyWith(
           bell: const BellConfig(
@@ -433,7 +412,6 @@ void main() {
         required void Function(String) onNotify,
           required engineConfig,
         }) => FakeBinding(),
-      ),
     ));
     await tester.pump();
     final state = tester.state(find.byType(TerminalView));
@@ -450,8 +428,7 @@ void main() {
       (tester) async {
     final title = ValueNotifier<String>('t');
     final binding = FakeBinding();
-    await tester.pumpWidget(MaterialApp(
-      home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
         engineFactory: ({
@@ -466,7 +443,6 @@ void main() {
         required void Function(String) onNotify,
           required engineConfig,
         }) => binding,
-      ),
     ));
     await tester.pump();
     final center = tester.getCenter(find.byType(CustomPaint).first);
@@ -489,7 +465,7 @@ void main() {
   // test here so any future re-rewrite of build() fails CI.
   testWidgets('DropTarget is wired into the widget tree', (tester) async {
     final title = ValueNotifier<String>('t');
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => _FakePty(),
       engineFactory: ({
@@ -497,7 +473,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => FakeBinding(),
-    )));
+    ));
     await tester.pump();
     expect(find.byType(DropTarget), findsOneWidget);
     title.dispose();
@@ -507,7 +483,7 @@ void main() {
     final title = ValueNotifier<String>('t');
     final pty = _FakePty();
     final binding = FakeBinding()..modeFlags = (1 << 4); // kModeBracketedPaste
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => pty,
       engineFactory: ({
@@ -515,7 +491,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => binding,
-    )));
+    ));
     await tester.pump();
     // Sync engine mode flags (kModeBracketedPaste) into the mirror grid.
     // The selectionStart → tap path is now the only cheap test hook that
@@ -544,7 +520,7 @@ void main() {
   testWidgets('IME commit writes utf8 bytes to the PTY (raw, not bracketed)', (tester) async {
     final title = ValueNotifier<String>('t');
     final pty = _FakePty();
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => pty,
       engineFactory: ({
@@ -552,7 +528,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => FakeBinding(),
-    )));
+    ));
     await tester.pump();
     final state = tester.state<State<TerminalView>>(find.byType(TerminalView));
     final ime = (state as dynamic).imeForTest as ImeSession;
@@ -570,7 +546,7 @@ void main() {
 
   testWidgets('PreeditOverlay mounts only while composing', (tester) async {
     final title = ValueNotifier<String>('t');
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => _FakePty(),
       engineFactory: ({
@@ -578,7 +554,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => FakeBinding(),
-    )));
+    ));
     await tester.pump();
     final state = tester.state<State<TerminalView>>(find.byType(TerminalView));
     final ime = (state as dynamic).imeForTest as ImeSession;
@@ -599,7 +575,7 @@ void main() {
     try {
       final title = ValueNotifier<String>('t');
       final pty = _FakePty();
-      await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+      await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => pty,
         engineFactory: ({
@@ -607,7 +583,7 @@ void main() {
           required onPtyWrite, required onTitle,
           required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
         }) => FakeBinding(),
-      )));
+      ));
       await tester.pump();
       await tester.tap(find.byType(CustomPaint).first);
       await tester.pump();
@@ -630,7 +606,7 @@ void main() {
     try {
       final title = ValueNotifier<String>('t');
       final pty = _FakePty();
-      await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+      await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => pty,
         engineFactory: ({
@@ -638,7 +614,7 @@ void main() {
           required onPtyWrite, required onTitle,
           required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
         }) => FakeBinding(),
-      )));
+      ));
       await tester.pump();
       await tester.tap(find.byType(CustomPaint).first);
       await tester.pump();
@@ -656,7 +632,7 @@ void main() {
       (tester) async {
     final title = ValueNotifier<String>('t');
     final pty = _FakePty();
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => pty,
       engineFactory: ({
@@ -664,7 +640,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => FakeBinding(),
-    )));
+    ));
     await tester.pump();
     await tester.tap(find.byType(CustomPaint).first);
     await tester.pump();
@@ -687,7 +663,7 @@ void main() {
     final title = ValueNotifier<String>('t');
     final pty = _FakePty();
     final binding = FakeBinding();
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => pty,
       engineFactory: ({
@@ -695,7 +671,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => binding,
-    )));
+    ));
     await tester.pumpAndSettle();
     // Engine startup may snapshot once via refreshView paths (resize, etc.).
     // Snapshot the post-startup baseline; the per-key delta below is what we
@@ -721,7 +697,7 @@ void main() {
     final title = ValueNotifier<String>('t');
     final pty = _FakePty();
     final binding = FakeBinding();
-    await tester.pumpWidget(MaterialApp(home: ExampleTerminalApp(
+    await tester.pumpWidget(ExampleTerminalApp(
       title: title,
       ptyFactory: ({required rows, required columns}) => pty,
       engineFactory: ({
@@ -729,7 +705,7 @@ void main() {
         required onPtyWrite, required onTitle,
         required onBell, required onClipboard, required onClipboardLoad, required void Function(String) onWorkingDir, required void Function(String) onNotify, required engineConfig,
       }) => binding,
-    )));
+    ));
     await tester.pump();
     // Focus the terminal so the IME is attached.
     await tester.tap(find.byType(CustomPaint).first);

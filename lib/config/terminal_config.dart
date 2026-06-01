@@ -8,6 +8,9 @@ import '../theme/terminal_theme.dart';
 import 'color_parse.dart';
 import 'platform_font_defaults.dart';
 
+/// Title used before the shell sets one and restored on OSC reset-title.
+const String kDefaultTerminalTitle = 'flutter_alacritty';
+
 /// Foreground/background/selection (packed 0x00RRGGBB) + the 16 ANSI colors.
 /// Opaque fg/bg pairs passed to the terminal painter for search highlights.
 class SearchMatchColors {

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../config/terminal_config.dart';
 import '../render/mirror_grid.dart';
 import '../src/rust/api/terminal.dart';
 import '../src/rust/engine.dart';
@@ -99,7 +100,7 @@ class FrbEngineBinding implements EngineBinding {
       } else if (e is EngineEvent_Title) {
         onTitle(e.field0);
       } else if (e is EngineEvent_ResetTitle) {
-        onTitle('flutter_alacritty');
+        onTitle(kDefaultTerminalTitle);
       } else if (e is EngineEvent_Bell) {
         onBell();
       } else if (e is EngineEvent_ClipboardStore) {

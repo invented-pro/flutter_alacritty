@@ -90,7 +90,7 @@ class ExampleTerminalApp extends StatefulWidget {
 
 class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   late final ValueNotifier<String> _title =
-      widget.title ?? ValueNotifier<String>('flutter_alacritty');
+      widget.title ?? ValueNotifier<String>(kDefaultTerminalTitle);
   late final bool _ownsTitle = widget.title == null;
   late final UrlLauncher _launch = widget.launchUrl ??
       (u) async => launcher.launchUrl(Uri.parse(u));
@@ -123,6 +123,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
 
   final GlobalKey<State<TerminalView>> _viewKey =
       GlobalKey<State<TerminalView>>();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   CellMetrics _measureMetrics(TerminalConfig config) => CellMetrics.measure(
       config.textStyle.copyWith(fontSize: config.font.size));
@@ -295,13 +296,15 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   }
 
   Future<void> _showContextMenu(Offset local, Offset global, CellOffset cell) async {
+    final overlay = _navigatorKey.currentState?.overlay;
+    if (overlay == null) return;
+    final menuContext = overlay.context;
     final selText = _engine?.selectionText() ?? '';
     final hyperUri = _engine?.hyperlinkAt(cell.row, cell.column);
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    final size = overlay?.size ?? MediaQuery.of(context).size;
+    final renderBox = overlay.context.findRenderObject() as RenderBox?;
+    final size = renderBox?.size ?? MediaQuery.of(menuContext).size;
     await showMenu<void>(
-      context: context,
+      context: menuContext,
       position: RelativeRect.fromLTRB(
         global.dx,
         global.dy,
@@ -374,6 +377,19 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: _title,
+      builder: (context, title, child) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        navigatorKey: _navigatorKey,
+        title: title,
+        home: child,
+      ),
+      child: _buildShell(),
+    );
+  }
+
+  Widget _buildShell() {
     return Scaffold(
       backgroundColor: Color(0xFF000000 | _config.colors.background),
       body: LayoutBuilder(

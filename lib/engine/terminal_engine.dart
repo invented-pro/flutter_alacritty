@@ -98,7 +98,8 @@ class TerminalEngine {
       StreamController<void>.broadcast();
   final StreamController<String> _notifyCtl =
       StreamController<String>.broadcast();
-  final ValueNotifier<String> _title = ValueNotifier<String>('flutter_alacritty');
+  final ValueNotifier<String> _title =
+      ValueNotifier<String>(kDefaultTerminalTitle);
   final ValueNotifier<String> _workingDir = ValueNotifier<String>('');
 
   TerminalEngineClient? _client;

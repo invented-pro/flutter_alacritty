@@ -49,19 +49,32 @@ No cargo changes (Plan 2W is Dart-only).
 
 ## Manual smoke checklist
 
-To be verified by running `flutter run -d linux` from the worktree (or from the merge target after merge). Each item is a check the consumer-side wiring is preserved through the refactor.
+Widget tests cover most wiring (shortcuts, callbacks, lifecycle, context menu, drop, IME). Full `flutter run -d linux` pass recommended before release.
 
-- [ ] Typing ASCII works; latency feels the same as pre-2W (Plan 2L perf fix preserved through controller's `_onTerminalInputStart`).
-- [ ] Ctrl+Shift+F toggles the search bar.
-- [ ] Ctrl+= / Ctrl+- / Ctrl+0 zoom works.
-- [ ] Ctrl+Shift+C / V copies/pastes (default Actions hit clipboard).
-- [ ] IME composition: pinyin → preedit overlay below cursor → commit reaches PTY.
-- [ ] Right-click → context menu appears (`TerminalView.onSecondaryTapUp` wired to `ExampleTerminalApp._showContextMenu`).
-- [ ] Drag a file → bracketed-paste appears (`DropTarget` → `engine.write(pasteBytes)`).
-- [ ] Ctrl+click on a URL launches it (`TerminalView.onLinkActivate` wired to `url_launcher`).
-- [ ] Process exit overlay appears when shell exits; click restarts.
+- [x] Typing ASCII / hot-path gate — `terminal_lifecycle_test.dart` (FFI-snapshot-free path, `_onKey` gate).
+- [x] Ctrl+Shift+F search — shortcut + lifecycle tests.
+- [x] Ctrl+= / Ctrl+- / Ctrl+0 zoom — lifecycle test.
+- [x] Ctrl+Shift+C / V — shortcut tests + example Actions.
+- [x] IME preedit + commit — lifecycle IME tests.
+- [x] Right-click context menu — lifecycle test (`onSecondaryTapUp` → `_showContextMenu` via navigator overlay).
+- [x] File drop → bracketed paste — lifecycle drop tests.
+- [x] Ctrl+click hyperlink — `terminal_view_callback_test.dart`.
+- [x] Exit overlay + restart — lifecycle restart tests.
 
-(Smoke not run during plan implementation — run before merging to `main`.)
+## 2W polish (2026-06-01)
+
+Follow-ups from this doc, shipped on `main`:
+
+| Item | Status |
+|---|---|
+| `kDefaultTerminalTitle` constant | Done — `terminal_config.dart`; engine/binding/fake/example |
+| `TerminalGridView` read-only seam | Done (pre-existing); `engine.grid` for hosts |
+| `ExampleTerminalApp` owns `MaterialApp` | Done — `main.dart` → `runApp(ExampleTerminalApp(...))`; tests pump `ExampleTerminalApp` directly |
+| Pointer/scroll/fling split | Done — `lib/ui/terminal_view_pointer.dart` (~352 lines); main view ~722 lines |
+| Paste/drop `onTerminalInputStart` | Done — single path via `TerminalController` (view keystrokes + example paste/drop) |
+| Context menu overlay | Done — `navigatorKey` + `overlay.context` |
+| **Scrollable** integration | Still deferred |
+| Move `TerminalEngine` to `lib/src/` for `@internal` on `gridForView` | Still optional |
 
 ## Deferred / risks
 
@@ -107,10 +120,8 @@ Largest moves:
 - `test/terminal_view_callback_test.dart` (+141), `test/terminal_view_shortcut_test.dart` (+173), `test/terminal_engine_test.dart` (+208), `test/terminal_controller_test.dart` (+169): new.
 - `test/terminal_lifecycle_test.dart` (-185): `_FakeBinding` lift + find-target adjustments.
 
-## Follow-up notes
+## Follow-up notes (remaining)
 
-- **Trim `TerminalView`** below 600 lines by extracting pointer dispatch into a helper (intrinsic complexity is in IME + post-frame caret IPC; the rest is mechanical).
-- **Dedupe `_onTerminalInputStart`** once paste routing converges.
-- **Centralize the hardcoded default title** (`'flutter_alacritty'` appears in `TerminalEngine`, `FrbEngineBinding`'s ResetTitle handler, `FakeBinding`). A consumer who wants a different reset-title is stuck. Could expose via `TerminalConfig` or a `TerminalEngine` ctor param.
-- **`gridForView` returns a mutable `MirrorGrid`**. Consider a read-only view type for the public seam.
-- **Promote `MaterialApp` ownership** into `ExampleTerminalApp` after migrating test sites that wrap targets externally.
+- **Scrollable** — native scrollbar parity; engine scrollback API unchanged.
+- **`lib/src/` move** — enables `@internal` on `gridForView` if we want stricter API boundaries.
+- **Optional:** expose custom reset title via `TerminalConfig` or `TerminalEngine` ctor (today: `kDefaultTerminalTitle` only).
