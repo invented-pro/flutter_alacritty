@@ -17,7 +17,7 @@ Flutter terminal widget powered by an [Alacritty](https://github.com/alacritty/a
 
 ```yaml
 dependencies:
-  flutter_alacritty: ^1.0.0
+  flutter_alacritty: ^2.1.0
 ```
 
 ## Use as a library

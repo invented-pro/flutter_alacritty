@@ -17,6 +17,10 @@
 # See PUBLISHING.md.
 /packages/rust_lib_flutter_alacritty/
 
+# Desktop app packaging artifacts (not part of the library).
+/dist/
+/distribute_options.yaml
+
 # Native / tool artifacts (pub also respects .gitignore; list explicitly).
 /build/
 **/.dart_tool/

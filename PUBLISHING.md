@@ -4,28 +4,14 @@ The FFI plugin is a **separate repo**
 ([rust_lib_flutter_alacritty](https://github.com/hhoao/rust_lib_flutter_alacritty)),
 linked here as `packages/rust_lib_flutter_alacritty/` (git submodule).
 
-Publish **in order**.
+Both packages are on pub.dev. To publish a new version:
 
-## 1. `rust_lib_flutter_alacritty`
+1. Bump and publish `rust_lib_flutter_alacritty` from
+   `packages/rust_lib_flutter_alacritty/` (submodule repo).
+2. Bump the `rust_lib_flutter_alacritty` constraint in this `pubspec.yaml`,
+   then `dart pub get`, `dart pub publish --dry-run`, `dart pub publish`.
 
-```bash
-cd packages/rust_lib_flutter_alacritty
-dart pub publish --dry-run
-dart pub publish
-```
-
-In the parent repo, temporarily move `.pubignore` aside if dry-run complains
-(see comment about `/packages/rust_lib_flutter_alacritty/`).
-
-## 2. `flutter_alacritty` (this repo)
-
-Remove `dependency_overrides` from `pubspec.yaml`, commit, then:
-
-```bash
-dart pub get
-dart pub publish --dry-run
-dart pub publish
-```
+Use `PUB_HOSTED_URL=https://pub.dev` if your shell points at a mirror.
 
 ## Pre-flight checklist
 

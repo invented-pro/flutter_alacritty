@@ -160,7 +160,6 @@ class ImeSession implements TextInputClient {
   void showAutocorrectionPromptRect(int start, int end) {}
   @override
   void connectionClosed() => detach();
-  @override
   bool onFocusReceived() => false;
   @override
   void didChangeInputControl(TextInputControl? old, TextInputControl? n) {}
