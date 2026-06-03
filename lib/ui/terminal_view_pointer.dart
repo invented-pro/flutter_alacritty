@@ -29,7 +29,10 @@ extension _TerminalViewPointer on TerminalViewState {
       modeFlags: _grid.modeFlags,
       base: widget.mouseCursor,
     );
-    if (next != _hoverCursor) setState(() => _hoverCursor = next);
+    if (next != _hoverCursor) {
+      // ignore: invalid_use_of_protected_member
+      setState(() => _hoverCursor = next);
+    }
   }
 
   void _refreshSelection() => _engine.refreshView();

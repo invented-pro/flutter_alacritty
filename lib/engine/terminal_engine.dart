@@ -309,6 +309,7 @@ class TerminalEngine {
   Future<void> drainForTest() async {
     // No binding means no work was ever scheduled (the grid is created by the
     // first resize); there is nothing to drain.
+    // ignore: invalid_use_of_visible_for_testing_member
     await _client?.drainForTest();
   }
 
