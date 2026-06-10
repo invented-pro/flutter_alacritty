@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/engine/engine_binding.dart';
@@ -73,6 +74,72 @@ class _SearchFake implements EngineBinding {
   void selectionClear() {}
   @override
   String? selectionText() => null;
+  @override
+  String? resolveHyperlink(int id) => null;
+  @override
+  void dispose() {}
+}
+
+class _SlowFakeBinding implements EngineBinding {
+  final Completer<void> release = Completer<void>();
+  GridUpdate _empty() => GridUpdate(
+        full: false,
+        rows: 1,
+        columns: 1,
+        lines: const [],
+        cursorRow: 0,
+        cursorCol: 0,
+        cursorVisible: true,
+      );
+
+  @override
+  Future<GridUpdate> advanceAndTakeDamage(Uint8List bytes) async {
+    await release.future;
+    return _empty();
+  }
+
+  @override
+  Future<void> advance(Uint8List bytes) async {}
+  @override
+  Future<GridUpdate> takeDamage() async => _empty();
+  @override
+  void pumpEvents() {}
+  @override
+  void resize(int columns, int rows) {}
+  @override
+  GridUpdate fullSnapshot() => _empty();
+  @override
+  GridUpdate fullSnapshotSearched() => _empty();
+  @override
+  Future<void> scrollLines(int delta) async {}
+  @override
+  Future<void> scrollPixels(double deltaPx) async {}
+  @override
+  Future<void> scrollToBottom() async {}
+  @override
+  void clearHistory() {}
+  @override
+  void reconfigure(EngineConfig config) {}
+  @override
+  void respondClipboardLoad(String text) {}
+  @override
+  void setCellPixels(int width, int height) {}
+  @override
+  void selectionStart(int displayRow, int col, bool rightHalf, int kind) {}
+  @override
+  void selectionUpdate(int displayRow, int col, bool rightHalf) {}
+  @override
+  void selectionClear() {}
+  @override
+  String? selectionText() => null;
+  @override
+  bool searchSet(String pattern) => false;
+  @override
+  bool searchNext() => false;
+  @override
+  bool searchPrev() => false;
+  @override
+  void searchClear() {}
   @override
   String? resolveHyperlink(int id) => null;
   @override
@@ -213,6 +280,27 @@ void main() {
     expect(binding.lastResizeRows, 10);
     expect(grid.rows, 10);
     expect(grid.columns, 40);
+  });
+
+  test('dispose during in-flight drain does not apply to disposed grid', () async {
+    final binding = _SlowFakeBinding();
+    final grid = MirrorGrid();
+    grid.initializeEmpty(1, 1);
+    late void Function() pendingDrain;
+    final client = TerminalEngineClient(
+      binding: binding,
+      grid: grid,
+      schedule: (cb) => pendingDrain = cb,
+    );
+
+    client.feed(Uint8List.fromList([1]));
+    pendingDrain();
+    client.dispose();
+    grid.dispose();
+    binding.release.complete();
+    await Future<void>.delayed(Duration.zero);
+    // Regression: completing the drain after dispose must not call
+    // notifyListeners on the disposed MirrorGrid (would throw in debug).
   });
 
   test('searchSet activates the searched snapshot and refreshes', () async {

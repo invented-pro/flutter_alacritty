@@ -47,6 +47,7 @@ class TerminalEngineClient {
   /// desync bugs (e.g. a stale _searchActive after engine restart leaving
   /// match highlights stuck or absent).
   void refreshView() {
+    if (_disposed) return;
     _grid.apply(_binding.fullSnapshotSearched());
     SchedulerBinding.instance.scheduleFrame();
   }
@@ -77,6 +78,7 @@ class TerminalEngineClient {
   String? resolveHyperlink(int id) => _binding.resolveHyperlink(id);
 
   void feed(Uint8List bytes) {
+    if (_disposed) return;
     _buf.add(bytes);
     _scheduleDrain();
   }
@@ -89,6 +91,7 @@ class TerminalEngineClient {
 
   Future<void> _drain() async {
     _drainScheduled = false;
+    if (_disposed) return;
     // Hold the advance guard across the WHOLE drain, including the scroll apply
     // below. Otherwise a feed() arriving during an awaited scroll/advance slips
     // past _scheduleDrain's (_drainScheduled || _advancing) gate and starts a
@@ -99,19 +102,22 @@ class TerminalEngineClient {
       // alacritty's scroll_up increases display_offset; deferring scroll until
       // after the drain lets output outrun wheel-down (can't reach the live end).
       await _applyPendingScroll();
-      if (_buf.isEmpty) return;
+      if (_disposed || _buf.isEmpty) return;
       final batch = _buf.takeBytes();
       final update = await _binding.advanceAndTakeDamage(batch);
+      if (_disposed) return;
       _applyUpdate(update);
+      if (_disposed) return;
       _binding.pumpEvents(); // route PtyWrite/Title/Bell/Clipboard for this batch
     } finally {
       _advancing = false;
-      _flushPendingResize();
+      if (!_disposed) _flushPendingResize();
     }
-    if (_buf.isNotEmpty) _scheduleDrain();
+    if (!_disposed && _buf.isNotEmpty) _scheduleDrain();
   }
 
   void _applyUpdate(GridUpdate update) {
+    if (_disposed) return;
     if (!update.full &&
         _grid.columns > 0 &&
         update.lines.any((l) => l.codepoints.length != _grid.columns)) {
@@ -123,6 +129,7 @@ class TerminalEngineClient {
   }
 
   void resize(int columns, int rows) {
+    if (_disposed) return;
     _pendingColumns = columns;
     _pendingRows = rows;
     if (!_advancing) {
