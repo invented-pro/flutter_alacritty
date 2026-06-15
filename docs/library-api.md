@@ -271,8 +271,10 @@ TerminalView(
 
 `UrlLinkProvider` (shipped, always enabled) detects `https?|ftp|file://…`. The host
 owns provider lifecycle — the view adds/removes its own listener but never disposes
-a provider. (Planned: `engine.cwd` from OSC 7 for live working-directory tracking,
-so a path provider can re-resolve relative links after `cd` inside the shell.)
+a provider. For live working-directory tracking, the engine exposes
+`engine.workingDir` (`ValueListenable<String>`, the raw OSC 7 `file://host/path`);
+a host can parse it to a local path and feed it to a path provider so relative
+links re-resolve after `cd` inside the shell.
 
 ## Theming
 
