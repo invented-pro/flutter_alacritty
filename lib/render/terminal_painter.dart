@@ -153,7 +153,7 @@ class TerminalPainter extends CustomPainter {
         );
         bgPaint.color = Color(0xFF000000 | ec.bg);
         canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
-        if (isSelected(grid.flagsAt(row, col))) {
+        if (isSelected(flags)) {
           canvas.drawRect(
             Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight),
             Paint()
