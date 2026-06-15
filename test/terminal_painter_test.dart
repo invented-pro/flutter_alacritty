@@ -16,10 +16,13 @@ class _RecordingGlyphCache extends GlyphCache {
   _RecordingGlyphCache()
       : super(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
   final List<(int, bool)> calls = [];
+  /// Records (codepoint, fg) for every tryGet call, enabling color assertions.
+  final List<(int, int)> fgCalls = [];
   @override
   Paragraph? tryGet(int codepoint, int fg,
       {bool bold = false, bool italic = false, bool wide = false}) {
     calls.add((codepoint, wide));
+    fgCalls.add((codepoint, fg));
     return super.tryGet(codepoint, fg, bold: bold, italic: italic, wide: wide);
   }
 }
@@ -223,5 +226,166 @@ void main() {
     expect(glyphs.calls.any((c) => c.$1 == 'a'.codeUnitAt(0)), isTrue);
     expect(glyphs.calls.any((c) => c.$1 == 'b'.codeUnitAt(0)), isTrue);
     expect(glyphs.calls.any((c) => c.$1 == 'c'.codeUnitAt(0)), isTrue);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Painter-level color assertions for the overlay path.
+  //
+  // The glyph cache's tryGet(codepoint, fg, …) receives the *effective* fg
+  // color that the painter computed, including any hint-color override.  We
+  // capture (codepoint, fg) in _RecordingGlyphCache.fgCalls and assert that:
+  //   1. An overlay-covered cell's glyph is rendered with the hint fg color
+  //      (proving the painter applied the hint-color path).
+  //   2. The fg seen for the overlay cell is identical to the fg seen for an
+  //      equivalent cell that carries a *real* kFlagHyperlink flag — i.e. the
+  //      overlay and the native hyperlink flag produce exactly the same painter
+  //      output (robust equivalence assertion).
+  //
+  // Limitation: canvas.drawLine (underline) is not intercepted by the glyph
+  // cache, and Flutter's test Canvas does not expose a recorded call list.
+  // We therefore cannot assert the underline draw directly at this layer.
+  // The `decorationYs` unit test above confirms the Y coordinate math; the
+  // painter code path at line ~203 gates drawLine on
+  // `effFlags & (kFlagUnderline | kFlagHyperlink) != 0`, which is covered by
+  // the same effFlags logic verified here.
+  // ---------------------------------------------------------------------------
+
+  testWidgets(
+      'overlay cell glyph uses hint fg color — same as real kFlagHyperlink cell',
+      (tester) async {
+    const int hintBg = 0xF4BF75;
+    const int hintFg = 0x181818; // the expected fg for both overlay and real hyperlink
+    const int baseFg = 0xD8D8D8;
+    const int baseBg = 0x181818;
+    const searchColors = SearchColors(
+      matchBg: 0xAC4242,
+      matchFg: 0x181818,
+      focusedBg: 0xF4BF75,
+      focusedFg: 0x181818,
+    );
+    const hintColors = HintColors(bg: hintBg, fg: hintFg);
+
+    // --- Part A: overlay cell (no kFlagHyperlink in grid flags) ---
+    final gridA = MirrorGrid();
+    gridA.apply(GridUpdate(
+      full: true,
+      rows: 1,
+      columns: 3,
+      lines: [
+        LineCells(
+          line: 0,
+          codepoints: Int32List.fromList('abc'.codeUnits),
+          fg: Int32List.fromList([baseFg, baseFg, baseFg]),
+          bg: Int32List.fromList([baseBg, baseBg, baseBg]),
+          // No kFlagHyperlink on any cell — col 1 is a link via overlay only.
+          flags: Uint16List.fromList([0, 0, 0]),
+        ),
+      ],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: false,
+    ));
+    final glyphsA = _RecordingGlyphCache();
+    final overlay = LinkOverlay({
+      0: const [LinkCellRange(start: 1, end: 2)], // col 1 ('b') is the overlay link
+    });
+
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: CustomPaint(
+        size: const Size(24, 16),
+        painter: TerminalPainter(
+          grid: gridA,
+          glyphs: glyphsA,
+          cellWidth: 8,
+          cellHeight: 16,
+          blinkOn: _steadyBlink,
+          selectionColor: 0x553A6EA5,
+          searchColors: searchColors,
+          hintColors: hintColors,
+          linkOverlay: overlay,
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // Col 0 ('a') and col 2 ('c') — no overlay — should use the base fg.
+    final aFgCalls = glyphsA.fgCalls
+        .where((c) => c.$1 == 'a'.codeUnitAt(0))
+        .toList();
+    expect(aFgCalls, isNotEmpty, reason: "'a' glyph must be rendered");
+    expect(aFgCalls.first.$2, baseFg, reason: "non-overlay cell keeps base fg");
+
+    // Col 1 ('b') — covered by overlay — must use the hint fg.
+    final bFgCallsA = glyphsA.fgCalls
+        .where((c) => c.$1 == 'b'.codeUnitAt(0))
+        .toList();
+    expect(bFgCallsA, isNotEmpty, reason: "'b' glyph must be rendered");
+    expect(
+      bFgCallsA.first.$2,
+      hintFg,
+      reason:
+          'overlay-covered cell must receive hint fg color (0x${hintFg.toRadixString(16)})',
+    );
+
+    // --- Part B: real kFlagHyperlink cell (no overlay) ---
+    final gridB = MirrorGrid();
+    gridB.apply(GridUpdate(
+      full: true,
+      rows: 1,
+      columns: 3,
+      lines: [
+        LineCells(
+          line: 0,
+          codepoints: Int32List.fromList('abc'.codeUnits),
+          fg: Int32List.fromList([baseFg, baseFg, baseFg]),
+          bg: Int32List.fromList([baseBg, baseBg, baseBg]),
+          // Col 1 carries a real kFlagHyperlink.
+          flags: Uint16List.fromList([0, kFlagHyperlink, 0]),
+        ),
+      ],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: false,
+    ));
+    final glyphsB = _RecordingGlyphCache();
+
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: CustomPaint(
+        size: const Size(24, 16),
+        painter: TerminalPainter(
+          grid: gridB,
+          glyphs: glyphsB,
+          cellWidth: 8,
+          cellHeight: 16,
+          blinkOn: _steadyBlink,
+          selectionColor: 0x553A6EA5,
+          searchColors: searchColors,
+          hintColors: hintColors,
+          // No overlay — the hyperlink flag is purely from the grid.
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    final bFgCallsB = glyphsB.fgCalls
+        .where((c) => c.$1 == 'b'.codeUnitAt(0))
+        .toList();
+    expect(bFgCallsB, isNotEmpty, reason: "'b' glyph must be rendered for real hyperlink");
+    expect(
+      bFgCallsB.first.$2,
+      hintFg,
+      reason: 'real kFlagHyperlink cell must also receive hint fg color',
+    );
+
+    // Equivalence: overlay path and native-hyperlink path must produce identical fg.
+    expect(
+      bFgCallsA.first.$2,
+      bFgCallsB.first.$2,
+      reason:
+          'overlay-link fg must equal native-kFlagHyperlink fg — '
+          'both painter paths must be equivalent',
+    );
   });
 }
