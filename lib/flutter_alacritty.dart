@@ -10,6 +10,12 @@ export 'controller/terminal_controller.dart';
 // the path to extend.
 export 'engine/engine_binding.dart' show EngineBinding, FrbEngineBinding;
 export 'engine/terminal_engine.dart';
+// Host-injectable link seam (clickable URLs / file paths). The library ships
+// UrlLinkProvider; consumers add their own (e.g. a filesystem-validating path
+// provider) and read LinkSpan payloads back via TerminalView.onLinkActivate.
+export 'links/terminal_link_provider.dart';
+export 'links/url_link_provider.dart';
+export 'links/link_overlay.dart';
 export 'pty/pty_backend.dart';
 export 'pty/flutter_pty_backend.dart';
 export 'theme/terminal_theme.dart';

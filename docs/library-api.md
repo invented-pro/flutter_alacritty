@@ -235,6 +235,45 @@ self-contained default (where one exists).
 - `onBell` — fires once per `Event::Bell`. If omitted, the view plays
   `SystemSoundType.alert`; supply this to replace or extend the default.
 
+## Link providers
+
+Beyond OSC 8 hyperlinks (which the engine tracks and exposes via
+`engine.hyperlinkAt`), the view supports **host-injectable link providers** that
+detect clickable spans in rendered text. `onLinkActivate` fires for both: an OSC 8
+cell yields its URI; a provider span yields the provider's `payload`.
+
+```dart
+abstract class TerminalLinkProvider extends ChangeNotifier {
+  Iterable<LinkSpan> scan(String lineText);   // sync candidate detection per line
+  bool isEnabled(LinkSpan span);              // sync gate: draw/clickable now?
+}
+class LinkSpan { final int start, end; final String payload; } // half-open [start,end)
+```
+
+The view, on each (debounced ~120 ms) grid change AND on any provider
+`notifyListeners`, scans every visible line through each provider, decorates the
+cells of **enabled** spans like a hyperlink (hint underline + click cursor), and
+on Ctrl/Cmd+click hands the covering span's `payload` to `onLinkActivate`.
+
+The library is IO-free: providers do their own work and call `notifyListeners`
+when their enabled-set changes. A provider that validates asynchronously (e.g. a
+filesystem check) returns `isEnabled == false` until confirmed, then notifies; the
+view re-decorates on the next debounced pass.
+
+```dart
+TerminalView(
+  engine,
+  // Default is [UrlLinkProvider()]; pass const [] to disable links entirely.
+  linkProviders: [UrlLinkProvider(), MyFilePathProvider(...)],
+  onLinkActivate: (payload) => openItSomehow(payload),
+)
+```
+
+`UrlLinkProvider` (shipped, always enabled) detects `https?|ftp|file://…`. The host
+owns provider lifecycle — the view adds/removes its own listener but never disposes
+a provider. (Planned: `engine.cwd` from OSC 7 for live working-directory tracking,
+so a path provider can re-resolve relative links after `cd` inside the shell.)
+
 ## Theming
 
 Two pure-data classes own the visual surface.
