@@ -279,6 +279,13 @@ class TerminalViewState extends State<TerminalView>
   @visibleForTesting
   GlyphCache get glyphCacheForTest => _glyphs;
 
+  @visibleForTesting
+  bool get isFlingingForTest => _flingTicker != null;
+
+  @visibleForTesting
+  void startFlingForTest(double velocityPxPerSec) =>
+      _startFling(velocityPxPerSec);
+
   @override
   void initState() {
     super.initState();
@@ -333,6 +340,9 @@ class TerminalViewState extends State<TerminalView>
         _ime.resetComposing(notify: false);
         _preedit = null;
       }
+      // Reused view: a kinetic fling coasting at swap time would scroll the
+      // swapped-in engine. Stop it so the fling doesn't bleed across members/tabs.
+      _stopFling();
       // TeamPilot-style hosts swap engines per member while the view keeps the
       // same layout cols/rows. _ensureSizing would skip onViewportResize, leaving
       // a PTY started in the background at 80×24 while the painter is full-screen.
