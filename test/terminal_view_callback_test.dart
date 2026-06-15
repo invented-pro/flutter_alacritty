@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,9 +7,80 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/terminal_engine.dart';
+import 'package:flutter_alacritty/links/terminal_link_provider.dart';
+import 'package:flutter_alacritty/links/url_link_provider.dart';
+import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/ui/terminal_view.dart';
 
 import 'fake_binding.dart';
+
+// ---------------------------------------------------------------------------
+// Stub link provider for link-overlay tests.
+// ---------------------------------------------------------------------------
+
+class _StubProvider extends TerminalLinkProvider {
+  _StubProvider(this.matchText, this.payload, {this.enabled = true});
+  final String matchText;
+  final String payload;
+  bool enabled;
+
+  @override
+  Iterable<LinkSpan> scan(String lineText) {
+    final i = lineText.indexOf(matchText);
+    return i < 0
+        ? const []
+        : [LinkSpan(start: i, end: i + matchText.length, payload: payload)];
+  }
+
+  @override
+  bool isEnabled(LinkSpan span) => enabled;
+}
+
+// ---------------------------------------------------------------------------
+// FakeBinding subclass that puts `text` on row 0 of every snapshot.
+// ---------------------------------------------------------------------------
+
+class _TextFakeBinding extends FakeBinding {
+  _TextFakeBinding(this.rowText);
+  final String rowText;
+
+  GridUpdate _textSnapshot() {
+    const cols = 80, rows = 24;
+    final codepoints = Int32List(cols)..fillRange(0, cols, 32);
+    for (var i = 0; i < rowText.length && i < cols; i++) {
+      codepoints[i] = rowText.codeUnitAt(i);
+    }
+    final line0 = LineCells(
+      line: 0,
+      codepoints: codepoints,
+      fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
+      bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+      flags: Uint16List(cols),
+      hyperlinkId: Int32List(cols),
+    );
+    LineCells blank(int i) => LineCells(
+          line: i,
+          codepoints: Int32List(cols)..fillRange(0, cols, 32),
+          fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
+          bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+          flags: Uint16List(cols),
+          hyperlinkId: Int32List(cols),
+        );
+    return GridUpdate(
+      full: true,
+      rows: rows,
+      columns: cols,
+      lines: [line0, for (var i = 1; i < rows; i++) blank(i)],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: false,
+      modeFlags: modeFlags,
+    );
+  }
+
+  @override
+  GridUpdate fullSnapshotSearched() => _textSnapshot();
+}
 
 Future<TerminalEngine> _engineForView(FakeBinding binding) async {
   // Use the lazy constructor path; the view drives `resize` on its first
@@ -28,6 +101,7 @@ Future<void> _pumpView(
   void Function(TapDownDetails, CellOffset)? onSecondaryTapDown,
   void Function(TapUpDetails, CellOffset)? onSecondaryTapUp,
   void Function(String)? onLinkActivate,
+  List<TerminalLinkProvider>? linkProviders,
 }) async {
   await tester.pumpWidget(MaterialApp(
     home: Scaffold(
@@ -38,6 +112,7 @@ Future<void> _pumpView(
         onSecondaryTapDown: onSecondaryTapDown,
         onSecondaryTapUp: onSecondaryTapUp,
         onLinkActivate: onLinkActivate,
+        linkProviders: linkProviders ?? [UrlLinkProvider()],
       ),
     ),
   ));
@@ -217,5 +292,131 @@ void main() {
     await tester.pump();
 
     expect(launched, 'https://example.org');
+  });
+
+  // -------------------------------------------------------------------------
+  // Link provider (overlay) tests
+  // -------------------------------------------------------------------------
+
+  testWidgets('linkOverlay is populated after debounce when provider matches',
+      (tester) async {
+    const matchText = 'STUB_LINK';
+    final provider = _StubProvider(matchText, 'stub-payload');
+    final binding = _TextFakeBinding(matchText);
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    await _pumpView(
+      tester,
+      engine: engine,
+      linkProviders: [provider],
+    );
+
+    // Throwaway click to populate the mirror grid from fullSnapshotSearched().
+    final painterTopLeft =
+        tester.getTopLeft(find.byType(CustomPaint).first);
+    final pos = painterTopLeft + const Offset(2, 2);
+    final prime =
+        await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await prime.up();
+    await tester.pump();
+
+    // Advance past the 120ms debounce.
+    await tester.pump(const Duration(milliseconds: 150));
+
+    final state = tester.state<TerminalViewState>(find.byType(TerminalView));
+    final overlay = state.linkOverlayForTest;
+    // Row 0, col 0 is inside STUB_LINK (start=0).
+    expect(overlay.isLinkCell(0, 0), isTrue,
+        reason: 'overlay should mark the stub link cells as link cells');
+    // A column well beyond the match text should not be a link.
+    expect(overlay.isLinkCell(0, matchText.length + 5), isFalse,
+        reason: 'columns outside the span should not be link cells');
+  });
+
+  testWidgets(
+      'Ctrl+click on enabled provider span fires onLinkActivate(payload)',
+      (tester) async {
+    const matchText = 'STUB_LINK';
+    final provider = _StubProvider(matchText, 'stub-payload');
+    final binding = _TextFakeBinding(matchText);
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    String? launched;
+    await _pumpView(
+      tester,
+      engine: engine,
+      onLinkActivate: (uri) => launched = uri,
+      linkProviders: [provider],
+    );
+
+    // Throwaway click to prime the grid.
+    final painterTopLeft =
+        tester.getTopLeft(find.byType(CustomPaint).first);
+    final pos = painterTopLeft + const Offset(2, 2);
+    final prime =
+        await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await prime.up();
+    await tester.pump();
+
+    // Wait for debounce to fire and overlay to be built.
+    await tester.pump(const Duration(milliseconds: 150));
+
+    // Ctrl+left-click on cell (0,0) which is inside STUB_LINK.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final click =
+        await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await click.up();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(launched, 'stub-payload',
+        reason: 'Ctrl+click on an enabled overlay link should fire onLinkActivate');
+  });
+
+  testWidgets('Ctrl+click on disabled provider span does NOT fire onLinkActivate',
+      (tester) async {
+    const matchText = 'STUB_LINK';
+    final provider = _StubProvider(matchText, 'stub-payload', enabled: false);
+    final binding = _TextFakeBinding(matchText);
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    String? launched;
+    await _pumpView(
+      tester,
+      engine: engine,
+      onLinkActivate: (uri) => launched = uri,
+      linkProviders: [provider],
+    );
+
+    // Throwaway click to prime the grid.
+    final painterTopLeft =
+        tester.getTopLeft(find.byType(CustomPaint).first);
+    final pos = painterTopLeft + const Offset(2, 2);
+    final prime =
+        await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await prime.up();
+    await tester.pump();
+
+    // Wait for debounce.
+    await tester.pump(const Duration(milliseconds: 150));
+
+    // The overlay should be empty because the provider is disabled.
+    final state = tester.state<TerminalViewState>(find.byType(TerminalView));
+    expect(state.linkOverlayForTest.isLinkCell(0, 0), isFalse,
+        reason: 'disabled provider should not add cells to the overlay');
+
+    // Ctrl+click should not fire the callback.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final click =
+        await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await click.up();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(launched, isNull,
+        reason: 'disabled span should not trigger onLinkActivate');
   });
 }

@@ -24,6 +24,9 @@ import '../input/key_input.dart';
 import '../input/mouse_input.dart';
 import '../input/paste.dart';
 import '../input/term_mode.dart';
+import '../links/link_overlay.dart';
+import '../links/terminal_link_provider.dart';
+import '../links/url_link_provider.dart';
 import '../render/cell_flags.dart';
 import '../render/cell_metrics.dart';
 import '../render/glyph_cache.dart';
@@ -69,6 +72,9 @@ MouseCursor hoverCursorFor({
   return base;
 }
 
+// Shared default so callers that omit [linkProviders] reuse one instance.
+final List<TerminalLinkProvider> _defaultLinkProviders = [UrlLinkProvider()];
+
 /// Pure render + input view over a [TerminalEngine].
 ///
 /// Owns render state (font, metrics, glyph cache, bell controller, blink
@@ -108,7 +114,9 @@ class TerminalView extends StatefulWidget {
     this.onLinkActivate,
     this.onBell,
     this.onViewportResize,
-  }) : textStyle = textStyle ?? TerminalStyle.defaults();
+    List<TerminalLinkProvider>? linkProviders,
+  })  : linkProviders = linkProviders ?? _defaultLinkProviders,
+        textStyle = textStyle ?? TerminalStyle.defaults();
 
   final TerminalEngine engine;
   final TerminalController? controller;
@@ -178,6 +186,10 @@ class TerminalView extends StatefulWidget {
   /// or layout). Hosts should resize the PTY to the same `(columns, rows)`.
   final void Function(int columns, int rows)? onViewportResize;
 
+  /// Host-injectable link sources. Defaults to a single URL provider so plain
+  /// consumers keep clickable URLs for free. Pass `const []` to disable.
+  final List<TerminalLinkProvider> linkProviders;
+
   @override
   State<TerminalView> createState() => TerminalViewState();
 }
@@ -238,6 +250,9 @@ class TerminalViewState extends State<TerminalView>
 
   StreamSubscription<void>? _bellSub;
 
+  LinkOverlay _linkOverlay = LinkOverlay.empty;
+  Timer? _linkDebounce;
+
   // The painter and UI helpers read the grid directly; the engine owns the
   // grid (single source of truth), and the view never paints before the
   // engine has been built (the host gates this with its error/exit
@@ -252,6 +267,9 @@ class TerminalViewState extends State<TerminalView>
 
   @visibleForTesting
   void flashBellForTest() => _flashBell();
+
+  @visibleForTesting
+  LinkOverlay get linkOverlayForTest => _linkOverlay;
 
   @override
   void initState() {
@@ -275,6 +293,10 @@ class TerminalViewState extends State<TerminalView>
     _focus.addListener(_reportFocus);
     _focus.addListener(_handleImeFocusChange);
     _bellSub = _engine.bell.listen((_) => _flashBell());
+    for (final p in widget.linkProviders) {
+      p.addListener(_recomputeLinksNow);
+    }
+    _grid.addListener(_scheduleLinkRecompute);
   }
 
   @override
@@ -291,6 +313,9 @@ class TerminalViewState extends State<TerminalView>
       _bellSub?.cancel();
       _bellSub = widget.engine.bell.listen((_) => _flashBell());
       _lastReportedCaretRect = null;
+      // Re-wire grid listener to the new engine's grid.
+      oldWidget.engine.gridForView.removeListener(_scheduleLinkRecompute);
+      widget.engine.gridForView.addListener(_scheduleLinkRecompute);
       // TeamPilot-style hosts swap engines per member while the view keeps the
       // same layout cols/rows. _ensureSizing would skip onViewportResize, leaving
       // a PTY started in the background at 80×24 while the painter is full-screen.
@@ -337,6 +362,15 @@ class TerminalViewState extends State<TerminalView>
         _glyphs = _newGlyphCache();
       });
     }
+    if (!identical(widget.linkProviders, oldWidget.linkProviders)) {
+      for (final p in oldWidget.linkProviders) {
+        p.removeListener(_recomputeLinksNow);
+      }
+      for (final p in widget.linkProviders) {
+        p.addListener(_recomputeLinksNow);
+      }
+      _scheduleLinkRecompute();
+    }
   }
 
   GlyphCache _newGlyphCache() => GlyphCache(
@@ -354,6 +388,7 @@ class TerminalViewState extends State<TerminalView>
   void dispose() {
     _stopFling();
     _blinkTimer?.cancel();
+    _linkDebounce?.cancel();
     _blinkOn.dispose();
     _bellSub?.cancel();
     _focus.removeListener(_reportFocus);
@@ -363,6 +398,10 @@ class TerminalViewState extends State<TerminalView>
     if (_ownsController) _controller.dispose();
     _bellCtrl.dispose();
     _glyphs.dispose();
+    _grid.removeListener(_scheduleLinkRecompute);
+    for (final p in widget.linkProviders) {
+      p.removeListener(_recomputeLinksNow);
+    }
     super.dispose();
   }
 
@@ -376,6 +415,58 @@ class TerminalViewState extends State<TerminalView>
       _bellCtrl.value = 1.0;
       _bellCtrl.animateTo(0.0, duration: widget.bellDuration);
     }
+  }
+
+  void _scheduleLinkRecompute() {
+    _linkDebounce?.cancel();
+    _linkDebounce =
+        Timer(const Duration(milliseconds: 120), _recomputeLinksNow);
+  }
+
+  void _recomputeLinksNow() {
+    if (!mounted) return;
+    if (widget.linkProviders.isEmpty) {
+      if (_linkOverlay != LinkOverlay.empty) {
+        setState(() => _linkOverlay = LinkOverlay.empty);
+      }
+      return;
+    }
+    final rows = <int, List<LinkCellRange>>{};
+    for (var row = 0; row < _grid.rows; row++) {
+      final text = _lineText(row);
+      if (text.trim().isEmpty) continue;
+      final ranges = <LinkCellRange>[];
+      for (final provider in widget.linkProviders) {
+        for (final span in provider.scan(text)) {
+          if (provider.isEnabled(span)) {
+            ranges.add(LinkCellRange(start: span.start, end: span.end));
+          }
+        }
+      }
+      if (ranges.isNotEmpty) rows[row] = ranges;
+    }
+    final next = LinkOverlay(rows);
+    if (next != _linkOverlay) setState(() => _linkOverlay = next);
+  }
+
+  String _lineText(int row) {
+    final sb = StringBuffer();
+    for (var c = 0; c < _grid.columns; c++) {
+      final cp = _grid.codepointAt(row, c);
+      sb.writeCharCode(cp == 0 ? 32 : cp);
+    }
+    return sb.toString();
+  }
+
+  String? _payloadAt(int row, int col) {
+    if (!_linkOverlay.isLinkCell(row, col)) return null;
+    final text = _lineText(row);
+    for (final provider in widget.linkProviders) {
+      for (final span in provider.scan(text)) {
+        if (provider.isEnabled(span) && span.contains(col)) return span.payload;
+      }
+    }
+    return null;
   }
 
   void _setZoom(double next) {
@@ -571,11 +662,11 @@ class TerminalViewState extends State<TerminalView>
 
   void _updateHoverCursor(Offset local) {
     final (r, c, _) = _cellAt(local);
-    final hyper = _grid.rows > r &&
-        _grid.columns > c &&
-        isHyperlink(_grid.flagsAt(r, c));
+    final inBounds = _grid.rows > r && _grid.columns > c;
+    final isLink = inBounds &&
+        (isHyperlink(_grid.flagsAt(r, c)) || _linkOverlay.isLinkCell(r, c));
     final next = hoverCursorFor(
-      hyperlink: hyper,
+      hyperlink: isLink,
       modeFlags: _grid.modeFlags,
       base: widget.mouseCursor,
     );
@@ -792,6 +883,7 @@ class TerminalViewState extends State<TerminalView>
                           bg: widget.theme.hintStart.bg,
                           fg: widget.theme.hintStart.fg,
                         ),
+                        linkOverlay: _linkOverlay,
                       ),
                     ),
                   ),
@@ -874,6 +966,11 @@ class TerminalViewState extends State<TerminalView>
       final uri = _engine.hyperlinkAt(r, c);
       if (uri != null) {
         widget.onLinkActivate?.call(uri);
+        return;
+      }
+      final payload = _payloadAt(r, c);
+      if (payload != null) {
+        widget.onLinkActivate?.call(payload);
         return;
       }
     }
