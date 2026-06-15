@@ -152,4 +152,56 @@ void main() {
     expect(() => s.detach(), returnsNormally);
     expect(s.isAttached, isFalse);
   });
+
+  group('resetComposing', () {
+    test('abandons in-flight preedit without committing it', () {
+      final commits = <String>[];
+      final preedits = <String?>[];
+      final s = ImeSession(
+        onCommit: commits.add,
+        onPreeditChanged: preedits.add,
+        onBackspace: noopBackspace,
+      );
+
+      // Drive a composing value so isComposing is true.
+      s.updateEditingValue(
+        const TextEditingValue(
+            text: 'ni', composing: TextRange(start: 0, end: 2)),
+      );
+      expect(s.isComposing, isTrue);
+      expect(preedits.last, 'ni');
+
+      // Reset — must abandon the composition, not commit it.
+      s.resetComposing();
+
+      expect(s.isComposing, isFalse,
+          reason: 'resetComposing must clear the composing flag');
+      expect(preedits.last, isNull,
+          reason: 'resetComposing must notify onPreeditChanged(null)');
+      expect(commits, isEmpty,
+          reason: 'resetComposing must NOT commit the preedit text');
+    });
+
+    test('resetComposing with notify:false skips onPreeditChanged', () {
+      final preedits = <String?>[];
+      final s = ImeSession(
+        onCommit: (_) {},
+        onPreeditChanged: preedits.add,
+        onBackspace: noopBackspace,
+      );
+
+      s.updateEditingValue(
+        const TextEditingValue(
+            text: 'ni', composing: TextRange(start: 0, end: 2)),
+      );
+      expect(s.isComposing, isTrue);
+      final preeditCountBefore = preedits.length;
+
+      s.resetComposing(notify: false);
+
+      expect(s.isComposing, isFalse);
+      expect(preedits.length, preeditCountBefore,
+          reason: 'notify:false must not fire onPreeditChanged');
+    });
+  });
 }

@@ -93,6 +93,12 @@ class ImeSession implements TextInputClient {
     if (notify) onPreeditChanged(null);
   }
 
+  /// Abandon any in-flight composition and restore the baseline editing state
+  /// WITHOUT closing the platform connection. Used when the host swaps the
+  /// engine under a reused view — the stale pre-edit must not commit into the
+  /// newly swapped-in engine.
+  void resetComposing({bool notify = true}) => _resetEditing(notify: notify);
+
   // TextInputClient ----------------------------------------------------------
 
   @override

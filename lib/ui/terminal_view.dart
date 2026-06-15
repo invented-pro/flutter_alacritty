@@ -265,6 +265,9 @@ class TerminalViewState extends State<TerminalView>
   ImeSession get imeForTest => _ime;
 
   @visibleForTesting
+  String? get preeditForTest => _preedit;
+
+  @visibleForTesting
   AnimationController get bellControllerForTest => _bellCtrl;
 
   @visibleForTesting
@@ -321,6 +324,15 @@ class TerminalViewState extends State<TerminalView>
       // Re-wire grid listener to the new engine's grid.
       oldWidget.engine.gridForView.removeListener(_scheduleLinkRecompute);
       widget.engine.gridForView.addListener(_scheduleLinkRecompute);
+      // The view is reused across engine swaps (TeamPilot host swaps engines
+      // per member/tab). Abandon any in-flight IME pre-edit so a stale
+      // composition can't commit into the swapped-in engine. notify:false +
+      // direct field assignment because build() runs right after didUpdateWidget
+      // (calling setState here would throw).
+      if (_ime.isComposing || _preedit != null) {
+        _ime.resetComposing(notify: false);
+        _preedit = null;
+      }
       // TeamPilot-style hosts swap engines per member while the view keeps the
       // same layout cols/rows. _ensureSizing would skip onViewportResize, leaving
       // a PTY started in the background at 80×24 while the painter is full-screen.
