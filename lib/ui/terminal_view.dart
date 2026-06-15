@@ -253,7 +253,7 @@ class TerminalViewState extends State<TerminalView>
   StreamSubscription<void>? _bellSub;
 
   LinkOverlay _linkOverlay = LinkOverlay.empty;
-  Timer? _linkDebounce;
+  bool _linkRecomputeScheduled = false;
 
   // The painter and UI helpers read the grid directly; the engine owns the
   // grid (single source of truth), and the view never paints before the
@@ -390,7 +390,6 @@ class TerminalViewState extends State<TerminalView>
   void dispose() {
     _stopFling();
     _blinkTimer?.cancel();
-    _linkDebounce?.cancel();
     _blinkOn.dispose();
     _bellSub?.cancel();
     _focus.removeListener(_reportFocus);
@@ -419,10 +418,19 @@ class TerminalViewState extends State<TerminalView>
     }
   }
 
+  // Coalesce all grid/provider notifications in the current event-loop turn
+  // into a single recompute that runs as a microtask — i.e. before the next
+  // frame paints. This keeps link decorations frame-coherent with scrolling
+  // (alacritty recomputes hints every render) instead of lagging behind a
+  // trailing debounce, while still collapsing bursts (heavy output) to one
+  // recompute per turn.
   void _scheduleLinkRecompute() {
-    _linkDebounce?.cancel();
-    _linkDebounce =
-        Timer(const Duration(milliseconds: 120), _recomputeLinksNow);
+    if (_linkRecomputeScheduled) return;
+    _linkRecomputeScheduled = true;
+    scheduleMicrotask(() {
+      _linkRecomputeScheduled = false;
+      _recomputeLinksNow();
+    });
   }
 
   void _recomputeLinksNow() {

@@ -447,6 +447,34 @@ void main() {
   });
 
   testWidgets(
+      'overlay tracks a grid change within a frame (no debounce stall on scroll)',
+      (tester) async {
+    // Reproduces the scroll bug: with a 120ms trailing debounce, the overlay
+    // is not recomputed while the grid keeps changing (e.g. during scroll), so
+    // decorations stick at stale viewport rows. The overlay must reflect the
+    // grid within one frame, well under any 120ms wait.
+    const matchText = 'STUB_LINK';
+    final provider = _StubProvider(matchText, 'stub-payload');
+    final binding = _TextFakeBinding(matchText);
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    await _pumpView(tester, engine: engine, linkProviders: [provider]);
+
+    // Populate the grid (prime), then pump ONE short frame — far below 120ms.
+    final painterTopLeft = tester.getTopLeft(find.byType(CustomPaint).first);
+    final pos = painterTopLeft + const Offset(2, 2);
+    final prime = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await prime.up();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    final state = tester.state<TerminalViewState>(find.byType(TerminalView));
+    expect(state.linkOverlayForTest.isLinkCell(0, 0), isTrue,
+        reason: 'overlay must update within a frame, not after a 120ms debounce '
+            '(otherwise link decorations stick during scroll)');
+  });
+
+  testWidgets(
       'provider notifyListeners flows through debounce and updates the overlay',
       (tester) async {
     const matchText = 'STUB_LINK';
