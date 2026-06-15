@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_alacritty/links/link_overlay.dart';
 import 'package:flutter_alacritty/render/cell_flags.dart';
 import 'package:flutter_alacritty/render/glyph_cache.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
@@ -142,5 +143,85 @@ void main() {
           kFlagMatchCurrent | kFlagMatch | kFlagHyperlink, base, search, hint);
       expect(r.bg, 0xF4BF75);
     });
+
+    test('overlay link (no grid kFlagHyperlink) produces same hint colors as a real hyperlink', () {
+      // Simulate what the painter does: the overlay says row=0, col=0 is a link;
+      // the grid cell has no kFlagHyperlink. The painter computes:
+      const int gridFlags = 0; // no hyperlink flag in grid
+      final overlay = LinkOverlay({
+        0: const [LinkCellRange(start: 0, end: 1)],
+      });
+      final bool overlayLink = overlay.isLinkCell(0, 0);
+      final int effFlags = overlayLink ? (gridFlags | kFlagHyperlink) : gridFlags;
+
+      final r = applyMatchOrHint(effFlags, base, search, hint);
+      expect(r.bg, hint.bg, reason: 'overlay cell gets hint bg');
+      expect(r.fg, hint.fg, reason: 'overlay cell gets hint fg');
+    });
+
+    test('search match still wins over overlay link (precedence preserved)', () {
+      const int gridFlags = kFlagMatch; // search match in grid
+      final overlay = LinkOverlay({
+        0: const [LinkCellRange(start: 0, end: 1)],
+      });
+      final bool overlayLink = overlay.isLinkCell(0, 0);
+      final int effFlags = overlayLink ? (gridFlags | kFlagHyperlink) : gridFlags;
+
+      final r = applyMatchOrHint(effFlags, base, search, hint);
+      expect(r.bg, search.matchBg, reason: 'match wins over overlay link');
+    });
+  });
+
+  testWidgets('TerminalPainter with LinkOverlay renders without error', (tester) async {
+    final grid = MirrorGrid();
+    grid.apply(GridUpdate(
+      full: true, rows: 1, columns: 3,
+      lines: [
+        LineCells(
+          line: 0,
+          codepoints: Int32List.fromList('abc'.codeUnits),
+          fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8, 0xD8D8D8]),
+          bg: Int32List.fromList([0x181818, 0x181818, 0x181818]),
+          // No kFlagHyperlink in grid flags for any cell.
+          flags: Uint16List.fromList([0, 0, 0]),
+        ),
+      ],
+      cursorRow: 0, cursorCol: 0, cursorVisible: false,
+    ));
+    final glyphs = _RecordingGlyphCache();
+
+    // Col 1 covered by overlay — should be treated as a hyperlink by the painter.
+    final overlay = LinkOverlay({
+      0: const [LinkCellRange(start: 1, end: 2)],
+    });
+
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: CustomPaint(
+        size: const Size(24, 16),
+        painter: TerminalPainter(
+          grid: grid,
+          glyphs: glyphs,
+          cellWidth: 8,
+          cellHeight: 16,
+          blinkOn: _steadyBlink,
+          selectionColor: 0x553A6EA5,
+          searchColors: const SearchColors(
+            matchBg: 0xAC4242,
+            matchFg: 0x181818,
+            focusedBg: 0xF4BF75,
+            focusedFg: 0x181818,
+          ),
+          hintColors: const HintColors(bg: 0xF4BF75, fg: 0x181818),
+          linkOverlay: overlay,
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // All three columns render their glyphs (no crash from the overlay path).
+    expect(glyphs.calls.any((c) => c.$1 == 'a'.codeUnitAt(0)), isTrue);
+    expect(glyphs.calls.any((c) => c.$1 == 'b'.codeUnitAt(0)), isTrue);
+    expect(glyphs.calls.any((c) => c.$1 == 'c'.codeUnitAt(0)), isTrue);
   });
 }

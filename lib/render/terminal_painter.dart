@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../links/link_overlay.dart';
 import 'box_drawing.dart';
 import 'cell_flags.dart';
 import 'glyph_cache.dart';
@@ -92,6 +93,7 @@ class TerminalPainter extends CustomPainter {
     required this.selectionColor,
     required this.searchColors,
     required this.hintColors,
+    this.linkOverlay = LinkOverlay.empty,
   })  : _paintGeneration = grid.generation,
         super(repaint: Listenable.merge([grid, blinkOn]));
 
@@ -103,6 +105,7 @@ class TerminalPainter extends CustomPainter {
   final int selectionColor;
   final SearchColors searchColors;
   final HintColors hintColors;
+  final LinkOverlay linkOverlay;
   final int _paintGeneration;
 
   @override
@@ -136,10 +139,12 @@ class TerminalPainter extends CustomPainter {
       final y = row * cellHeight;
       for (var col = 0; col < cols; col++) {
         final flags = grid.flagsAt(row, col);
+        final bool overlayLink = linkOverlay.isLinkCell(row, col);
+        final int effFlags = overlayLink ? (flags | kFlagHyperlink) : flags;
         final ec = applyMatchOrHint(
-          flags,
+          effFlags,
           effectiveColors(
-            flags,
+            effFlags,
             grid.fgAt(row, col),
             grid.bgAt(row, col),
           ),
@@ -169,9 +174,11 @@ class TerminalPainter extends CustomPainter {
         if (flags & kFlagWideSpacer != 0) continue; // covered by the wide glyph at col-1
         final cp = grid.codepointAt(row, col);
         if (cp == 32 || cp == 0) continue;
+        final bool overlayLink = linkOverlay.isLinkCell(row, col);
+        final int effFlags = overlayLink ? (flags | kFlagHyperlink) : flags;
         final ec = applyMatchOrHint(
-          flags,
-          effectiveColors(flags, grid.fgAt(row, col), grid.bgAt(row, col)),
+          effFlags,
+          effectiveColors(effFlags, grid.fgAt(row, col), grid.bgAt(row, col)),
           searchColors,
           hintColors,
         );
@@ -183,9 +190,9 @@ class TerminalPainter extends CustomPainter {
           final paragraph = glyphs.tryGet(
             cp,
             ec.fg,
-            bold: flags & kFlagBold != 0,
-            italic: flags & kFlagItalic != 0,
-            wide: flags & kFlagWide != 0,
+            bold: effFlags & kFlagBold != 0,
+            italic: effFlags & kFlagItalic != 0,
+            wide: effFlags & kFlagWide != 0,
           );
           if (paragraph != null) {
             canvas.drawParagraph(paragraph, Offset(col * cellWidth, y));
@@ -193,20 +200,20 @@ class TerminalPainter extends CustomPainter {
             needsWarmupFrame = true;
           }
         }
-        if (flags & (kFlagUnderline | kFlagStrikeout | kFlagHyperlink) != 0) {
+        if (effFlags & (kFlagUnderline | kFlagStrikeout | kFlagHyperlink) != 0) {
           final x = col * cellWidth;
           final decoPaint = Paint()
             ..color = fg
             ..strokeWidth = lineWidth;
           final ys = decorationYs(y, cellHeight);
-          if (flags & (kFlagUnderline | kFlagHyperlink) != 0) {
+          if (effFlags & (kFlagUnderline | kFlagHyperlink) != 0) {
             canvas.drawLine(
               Offset(x, ys.underline),
               Offset(x + cellWidth, ys.underline),
               decoPaint,
             );
           }
-          if (flags & kFlagStrikeout != 0) {
+          if (effFlags & kFlagStrikeout != 0) {
             canvas.drawLine(
               Offset(x, ys.strikeout),
               Offset(x + cellWidth, ys.strikeout),
@@ -273,5 +280,6 @@ class TerminalPainter extends CustomPainter {
       old.grid != grid ||
       old._paintGeneration != _paintGeneration ||
       old.cellWidth != cellWidth ||
-      old.cellHeight != cellHeight;
+      old.cellHeight != cellHeight ||
+      old.linkOverlay != linkOverlay;
 }
