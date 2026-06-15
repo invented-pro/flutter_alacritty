@@ -72,8 +72,10 @@ MouseCursor hoverCursorFor({
   return base;
 }
 
-// Shared default so callers that omit [linkProviders] reuse one instance.
-final List<TerminalLinkProvider> _defaultLinkProviders = [UrlLinkProvider()];
+// Shared default: one stateless, always-enabled UrlLinkProvider. Unmodifiable so
+// accidental mutation can't leak across TerminalView instances.
+final List<TerminalLinkProvider> _defaultLinkProviders =
+    List<TerminalLinkProvider>.unmodifiable([UrlLinkProvider()]);
 
 /// Pure render + input view over a [TerminalEngine].
 ///
@@ -294,7 +296,7 @@ class TerminalViewState extends State<TerminalView>
     _focus.addListener(_handleImeFocusChange);
     _bellSub = _engine.bell.listen((_) => _flashBell());
     for (final p in widget.linkProviders) {
-      p.addListener(_recomputeLinksNow);
+      p.addListener(_scheduleLinkRecompute);
     }
     _grid.addListener(_scheduleLinkRecompute);
   }
@@ -364,10 +366,10 @@ class TerminalViewState extends State<TerminalView>
     }
     if (!identical(widget.linkProviders, oldWidget.linkProviders)) {
       for (final p in oldWidget.linkProviders) {
-        p.removeListener(_recomputeLinksNow);
+        p.removeListener(_scheduleLinkRecompute);
       }
       for (final p in widget.linkProviders) {
-        p.addListener(_recomputeLinksNow);
+        p.addListener(_scheduleLinkRecompute);
       }
       _scheduleLinkRecompute();
     }
@@ -400,7 +402,7 @@ class TerminalViewState extends State<TerminalView>
     _glyphs.dispose();
     _grid.removeListener(_scheduleLinkRecompute);
     for (final p in widget.linkProviders) {
-      p.removeListener(_recomputeLinksNow);
+      p.removeListener(_scheduleLinkRecompute);
     }
     super.dispose();
   }
@@ -458,6 +460,8 @@ class TerminalViewState extends State<TerminalView>
     return sb.toString();
   }
 
+  // LinkOverlay stores only cell ranges (not payloads); re-scan the line on
+  // click to recover the covering span's payload.
   String? _payloadAt(int row, int col) {
     if (!_linkOverlay.isLinkCell(row, col)) return null;
     final text = _lineText(row);

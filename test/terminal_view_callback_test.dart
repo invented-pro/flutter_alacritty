@@ -36,6 +36,32 @@ class _StubProvider extends TerminalLinkProvider {
   bool isEnabled(LinkSpan span) => enabled;
 }
 
+/// Provider whose spans start disabled and flip to enabled on [confirm], which
+/// also fires `notifyListeners` — modelling an async validator (e.g. filesystem
+/// existence check) confirming a candidate after the fact.
+class _AsyncStubProvider extends TerminalLinkProvider {
+  _AsyncStubProvider(this.matchText, this.payload);
+  final String matchText;
+  final String payload;
+  bool _ready = false;
+
+  @override
+  Iterable<LinkSpan> scan(String lineText) {
+    final i = lineText.indexOf(matchText);
+    return i < 0
+        ? const []
+        : [LinkSpan(start: i, end: i + matchText.length, payload: payload)];
+  }
+
+  @override
+  bool isEnabled(LinkSpan span) => _ready;
+
+  void confirm() {
+    _ready = true;
+    notifyListeners();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // FakeBinding subclass that puts `text` on row 0 of every snapshot.
 // ---------------------------------------------------------------------------
@@ -418,5 +444,43 @@ void main() {
 
     expect(launched, isNull,
         reason: 'disabled span should not trigger onLinkActivate');
+  });
+
+  testWidgets(
+      'provider notifyListeners flows through debounce and updates the overlay',
+      (tester) async {
+    const matchText = 'STUB_LINK';
+    final provider = _AsyncStubProvider(matchText, 'stub-payload');
+    final binding = _TextFakeBinding(matchText);
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    await _pumpView(
+      tester,
+      engine: engine,
+      linkProviders: [provider],
+    );
+
+    // Throwaway click to populate the mirror grid from fullSnapshotSearched().
+    final painterTopLeft = tester.getTopLeft(find.byType(CustomPaint).first);
+    final pos = painterTopLeft + const Offset(2, 2);
+    final prime = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await prime.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    final state = tester.state<TerminalViewState>(find.byType(TerminalView));
+    // Not yet confirmed → the span is detected but not enabled.
+    expect(state.linkOverlayForTest.isLinkCell(0, 0), isFalse,
+        reason: 'unconfirmed async span should not be a link cell');
+
+    // Async confirmation fires notifyListeners; this must schedule a debounced
+    // recompute (not a direct one), after which the overlay marks the cell.
+    provider.confirm();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    expect(state.linkOverlayForTest.isLinkCell(0, 0), isTrue,
+        reason: 'provider notification should flow through the debounce and '
+            'update the overlay once the span is enabled');
   });
 }
