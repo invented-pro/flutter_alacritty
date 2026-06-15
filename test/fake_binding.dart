@@ -212,6 +212,53 @@ class FakeBinding implements RewireableEngineBinding {
   void dispose() {}
 }
 
+/// `FakeBinding` subclass that puts [rowText] on row 0 of every
+/// [fullSnapshotSearched] snapshot (80×24 grid, spaces elsewhere).
+///
+/// Useful for tests that need non-space glyphs in the grid so the painter
+/// actually rasterizes cells into the glyph cache (spaces are skipped).
+class TextFakeBinding extends FakeBinding {
+  TextFakeBinding(this.rowText);
+  final String rowText;
+
+  GridUpdate _textSnapshot() {
+    const cols = 80, rows = 24;
+    final codepoints = Int32List(cols)..fillRange(0, cols, 32);
+    for (var i = 0; i < rowText.length && i < cols; i++) {
+      codepoints[i] = rowText.codeUnitAt(i);
+    }
+    final line0 = LineCells(
+      line: 0,
+      codepoints: codepoints,
+      fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
+      bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+      flags: Uint16List(cols),
+      hyperlinkId: Int32List(cols),
+    );
+    LineCells blank(int i) => LineCells(
+          line: i,
+          codepoints: Int32List(cols)..fillRange(0, cols, 32),
+          fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
+          bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+          flags: Uint16List(cols),
+          hyperlinkId: Int32List(cols),
+        );
+    return GridUpdate(
+      full: true,
+      rows: rows,
+      columns: cols,
+      lines: [line0, for (var i = 1; i < rows; i++) blank(i)],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: false,
+      modeFlags: modeFlags,
+    );
+  }
+
+  @override
+  GridUpdate fullSnapshotSearched() => _textSnapshot();
+}
+
 /// `FakeBinding` subclass that invokes [onClear] on every `selectionClear()`.
 class ClearOnTapBinding extends FakeBinding {
   ClearOnTapBinding(this.onClear);

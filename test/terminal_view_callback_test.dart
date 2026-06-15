@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,7 +7,6 @@ import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/terminal_engine.dart';
 import 'package:flutter_alacritty/links/terminal_link_provider.dart';
 import 'package:flutter_alacritty/links/url_link_provider.dart';
-import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/ui/terminal_view.dart';
 
 import 'fake_binding.dart';
@@ -60,52 +57,6 @@ class _AsyncStubProvider extends TerminalLinkProvider {
     _ready = true;
     notifyListeners();
   }
-}
-
-// ---------------------------------------------------------------------------
-// FakeBinding subclass that puts `text` on row 0 of every snapshot.
-// ---------------------------------------------------------------------------
-
-class _TextFakeBinding extends FakeBinding {
-  _TextFakeBinding(this.rowText);
-  final String rowText;
-
-  GridUpdate _textSnapshot() {
-    const cols = 80, rows = 24;
-    final codepoints = Int32List(cols)..fillRange(0, cols, 32);
-    for (var i = 0; i < rowText.length && i < cols; i++) {
-      codepoints[i] = rowText.codeUnitAt(i);
-    }
-    final line0 = LineCells(
-      line: 0,
-      codepoints: codepoints,
-      fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
-      bg: Int32List(cols)..fillRange(0, cols, 0x181818),
-      flags: Uint16List(cols),
-      hyperlinkId: Int32List(cols),
-    );
-    LineCells blank(int i) => LineCells(
-          line: i,
-          codepoints: Int32List(cols)..fillRange(0, cols, 32),
-          fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
-          bg: Int32List(cols)..fillRange(0, cols, 0x181818),
-          flags: Uint16List(cols),
-          hyperlinkId: Int32List(cols),
-        );
-    return GridUpdate(
-      full: true,
-      rows: rows,
-      columns: cols,
-      lines: [line0, for (var i = 1; i < rows; i++) blank(i)],
-      cursorRow: 0,
-      cursorCol: 0,
-      cursorVisible: false,
-      modeFlags: modeFlags,
-    );
-  }
-
-  @override
-  GridUpdate fullSnapshotSearched() => _textSnapshot();
 }
 
 Future<TerminalEngine> _engineForView(FakeBinding binding) async {
@@ -328,7 +279,7 @@ void main() {
       (tester) async {
     const matchText = 'STUB_LINK';
     final provider = _StubProvider(matchText, 'stub-payload');
-    final binding = _TextFakeBinding(matchText);
+    final binding = TextFakeBinding(matchText);
     final engine = await _engineForView(binding);
     addTearDown(engine.dispose);
 
@@ -365,7 +316,7 @@ void main() {
       (tester) async {
     const matchText = 'STUB_LINK';
     final provider = _StubProvider(matchText, 'stub-payload');
-    final binding = _TextFakeBinding(matchText);
+    final binding = TextFakeBinding(matchText);
     final engine = await _engineForView(binding);
     addTearDown(engine.dispose);
 
@@ -405,7 +356,7 @@ void main() {
       (tester) async {
     const matchText = 'STUB_LINK';
     final provider = _StubProvider(matchText, 'stub-payload', enabled: false);
-    final binding = _TextFakeBinding(matchText);
+    final binding = TextFakeBinding(matchText);
     final engine = await _engineForView(binding);
     addTearDown(engine.dispose);
 
@@ -455,7 +406,7 @@ void main() {
     // grid within one frame, well under any 120ms wait.
     const matchText = 'STUB_LINK';
     final provider = _StubProvider(matchText, 'stub-payload');
-    final binding = _TextFakeBinding(matchText);
+    final binding = TextFakeBinding(matchText);
     final engine = await _engineForView(binding);
     addTearDown(engine.dispose);
 
@@ -479,7 +430,7 @@ void main() {
       (tester) async {
     const matchText = 'STUB_LINK';
     final provider = _AsyncStubProvider(matchText, 'stub-payload');
-    final binding = _TextFakeBinding(matchText);
+    final binding = TextFakeBinding(matchText);
     final engine = await _engineForView(binding);
     addTearDown(engine.dispose);
 
