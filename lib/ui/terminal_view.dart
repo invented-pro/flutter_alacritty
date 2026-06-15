@@ -273,6 +273,9 @@ class TerminalViewState extends State<TerminalView>
   @visibleForTesting
   LinkOverlay get linkOverlayForTest => _linkOverlay;
 
+  @visibleForTesting
+  GlyphCache get glyphCacheForTest => _glyphs;
+
   @override
   void initState() {
     super.initState();
