@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -12,6 +13,15 @@ import 'terminal_engine_client.dart';
 // Re-export the read-only grid view so external consumers can use it without
 // importing the render-layer module directly.
 export '../render/mirror_grid.dart' show TerminalGridView;
+
+/// Smallest grid the VT model can represent. A fullwidth glyph writes its cell
+/// plus a trailing spacer, so a single-column grid makes the engine index past
+/// the row end and panic. The native engine clamps to this floor at its size
+/// boundary; producers (viewport layout, PTY geometry) clamp here too so they
+/// never even ask for a degenerate grid. Keep in sync with `MIN_COLUMNS` /
+/// `MIN_SCREEN_LINES` in `rust/src/engine.rs`.
+const int kMinTerminalColumns = 2;
+const int kMinTerminalRows = 1;
 
 /// Factory that builds an [EngineBinding] given the engine event callbacks.
 /// The four callbacks are wired into private streams/notifiers on
@@ -95,6 +105,19 @@ class TerminalEngine {
   EngineBinding? _binding;
   bool _disposed = false;
 
+  // Pre-bind buffers. The native grid is created lazily, but only `resize`
+  // (and the `fromBinding` test path) carry authoritative dimensions — a grid
+  // must never be born at a size nobody asked for. Calls that arrive before the
+  // first `resize` (PTY output, cell-pixel metrics, live reconfigure) stash
+  // here and replay in [_drainPendingPreBind] the instant the binding exists,
+  // so the first parse runs at the real width and no output is dropped.
+  final BytesBuilder _pendingFeed = BytesBuilder(copy: false);
+  ({int width, int height})? _pendingCellPixels;
+  EngineConfig? _pendingReconfig;
+
+  /// Whether the native binding has been created (i.e. a real size has landed).
+  bool get isBound => _client != null;
+
   /// Engine → PTY (and `write(bytes)` echoes). Drain into the PTY directly:
   ///   `engine.output.listen(pty.write)`.
   Stream<Uint8List> get output => _outputCtl.stream;
@@ -140,15 +163,21 @@ class TerminalEngine {
   /// about moving the engine to `lib/src/` to fix the annotation.)
   MirrorGrid get gridForView => _grid;
 
-  /// PTY → engine. Lazy-inits the binding on first call.
+  /// PTY → engine. Buffers until the first [resize] establishes a real grid
+  /// width — parsing terminal output before the line width is known would write
+  /// into a fabricated grid (see [_pendingFeed]).
   void feed(Uint8List bytes) {
-    _ensureBound();
+    if (_client == null) {
+      _pendingFeed.add(bytes);
+      return;
+    }
     _client!.feed(bytes);
   }
 
-  /// Cell-grid resize. Lazy-inits the binding on first call.
+  /// Cell-grid resize. This is the authoritative size source: it creates the
+  /// native binding on first call and then replays anything that arrived early.
   void resize({required int columns, required int rows}) {
-    _ensureBound(columns: columns, rows: rows);
+    _bindWithSize(columns: columns, rows: rows);
     _client!.resize(columns, rows);
   }
 
@@ -215,14 +244,22 @@ class TerminalEngine {
   /// Answer a pending OSC 52 paste request with [text] (host reads the system
   /// clipboard, then calls this). Encoded reply goes out on [output].
   void respondClipboardLoad(String text) {
-    _ensureBound();
+    // A load reply can only answer an OSC 52 query the program already emitted,
+    // which means the engine has produced output and is therefore bound. Before
+    // any binding there is no pending request to satisfy — nothing to do.
+    if (_client == null) return;
     _binding!.respondClipboardLoad(text);
     _client!.pumpEventsNow();
   }
 
   /// Push the measured cell pixel size so the engine can answer CSI 14/18 t.
+  /// Carries no grid dimensions, so it never creates the binding; if it arrives
+  /// before sizing it is stashed and applied when the grid is built.
   void setCellPixels(int width, int height) {
-    _ensureBound();
+    if (_binding == null) {
+      _pendingCellPixels = (width: width, height: height);
+      return;
+    }
     _binding!.setCellPixels(width, height);
   }
 
@@ -233,7 +270,12 @@ class TerminalEngine {
   /// Live-apply engine-side config (scrollback, palette, semantic chars,
   /// cursor defaults, osc52) without re-spawning. Safe to call repeatedly.
   void reconfigure(TerminalConfig config) {
-    _ensureBound();
+    if (_binding == null) {
+      // No grid yet — remember the latest config and apply it the moment the
+      // binding is built, so the first paint already reflects it.
+      _pendingReconfig = config.engineConfig;
+      return;
+    }
     _binding!.reconfigure(config.engineConfig);
     // A palette change can enqueue a PtyWrite (OSC 997 color-scheme report, for
     // programs subscribed via mode 2031). Flush it now so a live theme toggle
@@ -251,7 +293,8 @@ class TerminalEngine {
   /// Awaits pending PTY batches. Use in tests before reading [grid].
   @visibleForTesting
   Future<void> drainForTest() async {
-    _ensureBound();
+    // No binding means no work was ever scheduled (the grid is created by the
+    // first resize); there is nothing to drain.
     await _client?.drainForTest();
   }
 
@@ -271,18 +314,17 @@ class TerminalEngine {
 
   // ---- internals -----------------------------------------------------------
 
-  /// Build the binding+client on first feed/resize.
-  void _ensureBound({int? columns, int? rows}) {
+  /// Build the binding+client at an authoritative size (first [resize]).
+  ///
+  /// Only callers that carry real grid dimensions reach here, so the native
+  /// grid is never created at a fabricated size. The Rust engine additionally
+  /// clamps to the VT minimum, so even a degenerate request is made safe at the
+  /// single boundary where dimensions become geometry.
+  void _bindWithSize({required int columns, required int rows}) {
     if (_client != null) return;
-    // resize() comes in with explicit cols/rows; feed() doesn't — but feed()
-    // can only meaningfully run after at least one resize, so we fall back to
-    // 1×1 if a caller flushes data before sizing (the engine resizes on
-    // [resize] anyway). This matches `FrbEngineBinding`'s ctor requirements.
-    final cols = columns ?? 1;
-    final r = rows ?? 1;
     final binding = _engineFactory(
-      columns: cols,
-      rows: r,
+      columns: columns,
+      rows: rows,
       onPtyWrite: _onPtyWrite,
       onTitle: _onTitle,
       onBell: _onBell,
@@ -306,6 +348,26 @@ class TerminalEngine {
       schedule: schedule,
     );
     _rewireBindingCallbacks(binding);
+    _drainPendingPreBind();
+  }
+
+  /// Replay state captured before the binding existed. Metrics and config go in
+  /// before buffered PTY bytes so the first parse runs with the right cell size
+  /// and palette.
+  void _drainPendingPreBind() {
+    final cells = _pendingCellPixels;
+    if (cells != null) {
+      _pendingCellPixels = null;
+      _binding!.setCellPixels(cells.width, cells.height);
+    }
+    final reconfig = _pendingReconfig;
+    if (reconfig != null) {
+      _pendingReconfig = null;
+      _binding!.reconfigure(reconfig);
+    }
+    if (_pendingFeed.isNotEmpty) {
+      _client!.feed(_pendingFeed.takeBytes());
+    }
   }
 
   /// FRB-backed bindings take callbacks in their ctor (final fields); fakes

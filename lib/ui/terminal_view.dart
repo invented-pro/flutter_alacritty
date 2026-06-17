@@ -855,8 +855,12 @@ class TerminalViewState extends State<TerminalView>
             (constraints.maxWidth - pad.horizontal).clamp(0.0, double.infinity);
         final availH =
             (constraints.maxHeight - pad.vertical).clamp(0.0, double.infinity);
-        final cols = (availW / _metrics.width).floor().clamp(1, 1000);
-        final rows = (availH / _metrics.height).floor().clamp(1, 1000);
+        // Never size below the VT minimum: a 1-column grid panics the engine
+        // when a fullwidth glyph arrives (see [kMinTerminalColumns]). During a
+        // near-zero-width layout frame (tab-open animation, collapsed pane) the
+        // floored count would otherwise be 1.
+        final cols = (availW / _metrics.width).floor().clamp(kMinTerminalColumns, 1000);
+        final rows = (availH / _metrics.height).floor().clamp(kMinTerminalRows, 1000);
         _ensureSizing(cols, rows);
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _reportCaretRectToIme());

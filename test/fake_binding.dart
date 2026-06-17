@@ -115,10 +115,18 @@ class FakeBinding implements RewireableEngineBinding {
     lastCellHeight = height;
   }
 
+  /// Bytes handed to the engine via either advance path, in order — lets tests
+  /// assert pre-bind buffered feed is flushed once the binding exists.
+  final List<int> fedBytes = [];
   @override
-  Future<void> advance(Uint8List bytes) async {}
+  Future<void> advance(Uint8List bytes) async {
+    fedBytes.addAll(bytes);
+  }
   @override
-  Future<GridUpdate> advanceAndTakeDamage(Uint8List bytes) async => _blank();
+  Future<GridUpdate> advanceAndTakeDamage(Uint8List bytes) async {
+    fedBytes.addAll(bytes);
+    return _blank();
+  }
   @override
   Future<GridUpdate> takeDamage() async => _blank();
   @override

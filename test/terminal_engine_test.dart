@@ -177,9 +177,12 @@ void main() {
     h.engine.dispose();
   });
 
-  test('default ctor defers binding construction until first feed/resize',
+  test('only resize binds the engine; pre-bind calls buffer then replay',
       () async {
     var factoryCalls = 0;
+    late int boundCols;
+    late int boundRows;
+    final fake = FakeBinding();
     final engine = TerminalEngine(
       config: TerminalConfig.defaults(),
       engineFactory: ({
@@ -195,16 +198,37 @@ void main() {
         required engineConfig,
       }) {
         factoryCalls++;
-        return FakeBinding();
+        boundCols = columns;
+        boundRows = rows;
+        return fake;
       },
     );
     // No native init yet — even title is readable.
     expect(engine.title.value, isNotNull);
     expect(factoryCalls, 0);
 
+    // Non-sizing calls must NOT fabricate a grid: the parser cannot run before
+    // the line width is known. They stash and replay on bind.
+    engine.setCellPixels(7, 15);
+    engine.feed(Uint8List.fromList([65, 66]));
+    engine.feed(Uint8List.fromList([67]));
+    expect(factoryCalls, 0, reason: 'feed/setCellPixels must not bind');
+    expect(engine.isBound, isFalse);
+    expect(fake.fedBytes, isEmpty);
+    expect(fake.lastCellWidth, isNull);
+
+    // The first resize is the authoritative size source — it binds exactly once
+    // at the real dimensions and replays everything buffered, metrics first.
     engine.resize(columns: 80, rows: 24);
-    await Future<void>.delayed(Duration.zero);
     expect(factoryCalls, 1);
+    expect(boundCols, 80);
+    expect(boundRows, 24);
+    expect(fake.lastCellWidth, 7);
+    expect(fake.lastCellHeight, 15);
+    // Feed is batched through the client's drain scheduler; flush it.
+    await engine.drainForTest();
+    expect(fake.fedBytes, [65, 66, 67],
+        reason: 'buffered PTY output replays in order — no first frame lost');
 
     engine.dispose();
   });
