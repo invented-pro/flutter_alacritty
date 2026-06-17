@@ -114,6 +114,7 @@ class TerminalView extends StatefulWidget {
     this.onSecondaryTapDown,
     this.onSecondaryTapUp,
     this.onLinkActivate,
+    this.primaryTapActivatesLink = false,
     this.onBell,
     this.onViewportResize,
     List<TerminalLinkProvider>? linkProviders,
@@ -180,6 +181,14 @@ class TerminalView extends StatefulWidget {
   final void Function(TapUpDetails, CellOffset)? onSecondaryTapUp;
   final void Function(String uri)? onLinkActivate;
 
+  /// When true, a plain (unmodified) left-click on a hyperlink or detected-link
+  /// cell fires [onLinkActivate] instead of forwarding the click to the program
+  /// (or starting a selection). Ctrl/Cmd-click always activates links
+  /// regardless. Non-link cells are unaffected — they still select / report to
+  /// the program as usual. Defaults to `false` to preserve standard terminal
+  /// mouse semantics; hosts that prefer click-to-open opt in.
+  final bool primaryTapActivatesLink;
+
   /// Bell event hook (fires in addition to the visual flash). If null, the
   /// view plays a system alert sound (current behavior).
   final void Function()? onBell;
@@ -237,6 +246,10 @@ class TerminalViewState extends State<TerminalView>
   Offset? _secondaryDownGlobal;
   DateTime _lastClick = DateTime.fromMillisecondsSinceEpoch(0);
   bool _selecting = false;
+  // Set when a primary-button press activated a link, so the matching release
+  // is swallowed instead of reported to the program (which would otherwise see
+  // a phantom click and open the link a second time externally).
+  bool _linkActivatedOnDown = false;
   double _touchScrollAccum = 0;
   // Kinetic fling (touch + trackpad). Velocity in px/s, positive = scrolling up
   // into history. Decays per GNOME Shell's swipeTracker model (decel^dt_ms) on a
@@ -999,18 +1012,27 @@ class TerminalViewState extends State<TerminalView>
   void _onPointerDown(PointerDownEvent e) {
     if (e.kind != PointerDeviceKind.mouse) return;
     _focus.requestFocus();
+    _linkActivatedOnDown = false;
     final hw = HardwareKeyboard.instance;
-    // Ctrl/Cmd + left-click on a hyperlink cell → host launches URI.
-    if ((hw.isControlPressed || hw.isMetaPressed) &&
-        e.buttons & kPrimaryButton != 0) {
+    // Left-click on a link cell → host launches URI. Always on Ctrl/Cmd-click;
+    // also on a plain click when [primaryTapActivatesLink] is set (Shift still
+    // forces selection). Non-link cells fall through to normal handling, so
+    // they keep selecting / reporting to the program.
+    final wantLinkActivate = e.buttons & kPrimaryButton != 0 &&
+        (hw.isControlPressed ||
+            hw.isMetaPressed ||
+            (widget.primaryTapActivatesLink && !hw.isShiftPressed));
+    if (wantLinkActivate) {
       final (r, c, _) = _cellAt(e.localPosition);
       final uri = _engine.hyperlinkAt(r, c);
       if (uri != null) {
+        _linkActivatedOnDown = true;
         widget.onLinkActivate?.call(uri);
         return;
       }
       final payload = _payloadAt(r, c);
       if (payload != null) {
+        _linkActivatedOnDown = true;
         widget.onLinkActivate?.call(payload);
         return;
       }
@@ -1073,6 +1095,8 @@ class TerminalViewState extends State<TerminalView>
 
   void _onPointerMove(PointerMoveEvent e) {
     if (e.kind != PointerDeviceKind.mouse) return;
+    // A link-activating press is in flight; don't report drag to the program.
+    if (_linkActivatedOnDown) return;
     if (_selecting) {
       final (r, c, rh) = _cellAt(e.localPosition);
       _controller.selectionUpdate(r, c, rh);
@@ -1089,6 +1113,12 @@ class TerminalViewState extends State<TerminalView>
 
   void _onPointerUp(PointerUpEvent e) {
     if (e.kind != PointerDeviceKind.mouse) return;
+    // The press activated a link and was not reported to the program; swallow
+    // the release too so the program doesn't see a phantom click.
+    if (_linkActivatedOnDown) {
+      _linkActivatedOnDown = false;
+      return;
+    }
     // Drain a pending secondary press. Use the down-time cell so the
     // callback reports where the right click started, matching the
     // GestureDetector.onSecondaryTapUp convention.

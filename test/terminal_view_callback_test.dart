@@ -78,6 +78,7 @@ Future<void> _pumpView(
   void Function(TapDownDetails, CellOffset)? onSecondaryTapDown,
   void Function(TapUpDetails, CellOffset)? onSecondaryTapUp,
   void Function(String)? onLinkActivate,
+  bool primaryTapActivatesLink = false,
   List<TerminalLinkProvider>? linkProviders,
 }) async {
   await tester.pumpWidget(MaterialApp(
@@ -89,6 +90,7 @@ Future<void> _pumpView(
         onSecondaryTapDown: onSecondaryTapDown,
         onSecondaryTapUp: onSecondaryTapUp,
         onLinkActivate: onLinkActivate,
+        primaryTapActivatesLink: primaryTapActivatesLink,
         linkProviders: linkProviders ?? [UrlLinkProvider()],
       ),
     ),
@@ -269,6 +271,71 @@ void main() {
     await tester.pump();
 
     expect(launched, 'https://example.org');
+  });
+
+  testWidgets(
+      'primaryTapActivatesLink: a plain left-click on a hyperlink fires '
+      'onLinkActivate without falling through to selection', (tester) async {
+    final binding = FakeBinding()
+      ..hyperlinkAt[(0, 0)] = 7
+      ..hyperlinkUris[7] = 'https://example.org';
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    String? launched;
+    await _pumpView(
+      tester,
+      engine: engine,
+      primaryTapActivatesLink: true,
+      onLinkActivate: (uri) => launched = uri,
+    );
+
+    final painterTopLeft = tester.getTopLeft(find.byType(CustomPaint).first);
+    final pos = painterTopLeft + const Offset(2, 2);
+    // Prime the mirror grid with the hyperlink snapshot.
+    final prime = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await prime.up();
+    await tester.pump();
+
+    final selStartBefore = binding.selStartCalls;
+    // Plain left-click (no modifiers) on the hyperlink cell.
+    final click = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await click.up();
+    await tester.pump();
+
+    expect(launched, 'https://example.org');
+    // The press was consumed by link activation, not by a selection start —
+    // and the matching release is swallowed too (no double handling).
+    expect(binding.selStartCalls, selStartBefore);
+  });
+
+  testWidgets(
+      'without primaryTapActivatesLink, a plain left-click does NOT fire '
+      'onLinkActivate (only Ctrl/Cmd-click does)', (tester) async {
+    final binding = FakeBinding()
+      ..hyperlinkAt[(0, 0)] = 7
+      ..hyperlinkUris[7] = 'https://example.org';
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    String? launched;
+    await _pumpView(
+      tester,
+      engine: engine,
+      onLinkActivate: (uri) => launched = uri,
+    );
+
+    final painterTopLeft = tester.getTopLeft(find.byType(CustomPaint).first);
+    final pos = painterTopLeft + const Offset(2, 2);
+    final prime = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await prime.up();
+    await tester.pump();
+
+    final click = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await click.up();
+    await tester.pump();
+
+    expect(launched, isNull);
   });
 
   // -------------------------------------------------------------------------
