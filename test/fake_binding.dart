@@ -40,9 +40,9 @@ class FakeBinding implements RewireableEngineBinding {
         lines: [
           LineCells(
             line: 0,
-            codepoints: Int32List(1),
-            fg: Int32List(1),
-            bg: Int32List(1),
+            codepoints: Uint32List(1),
+            fg: Uint32List(1),
+            bg: Uint32List(1),
             flags: Uint16List(1),
           ),
         ],
@@ -54,7 +54,7 @@ class FakeBinding implements RewireableEngineBinding {
 
   GridUpdate _hyperlinkSnapshot() {
     const cols = 80, rows = 24;
-    final hyperlinks = Int32List(cols);
+    final hyperlinks = Uint32List(cols);
     final flags = Uint16List(cols);
     hyperlinkAt.forEach((rc, id) {
       if (rc.$1 == 0 && rc.$2 < cols) {
@@ -64,19 +64,19 @@ class FakeBinding implements RewireableEngineBinding {
     });
     final line0 = LineCells(
       line: 0,
-      codepoints: Int32List(cols)..fillRange(0, cols, 32),
-      fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
-      bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+      codepoints: Uint32List(cols)..fillRange(0, cols, 32),
+      fg: Uint32List(cols)..fillRange(0, cols, 0xD8D8D8),
+      bg: Uint32List(cols)..fillRange(0, cols, 0x181818),
       flags: flags,
       hyperlinkId: hyperlinks,
     );
     LineCells blank(int i) => LineCells(
           line: i,
-          codepoints: Int32List(cols)..fillRange(0, cols, 32),
-          fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
-          bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+          codepoints: Uint32List(cols)..fillRange(0, cols, 32),
+          fg: Uint32List(cols)..fillRange(0, cols, 0xD8D8D8),
+          bg: Uint32List(cols)..fillRange(0, cols, 0x181818),
           flags: Uint16List(cols),
-          hyperlinkId: Int32List(cols),
+          hyperlinkId: Uint32List(cols),
         );
     return GridUpdate(
       full: true,
@@ -231,25 +231,25 @@ class TextFakeBinding extends FakeBinding {
 
   GridUpdate _textSnapshot() {
     const cols = 80, rows = 24;
-    final codepoints = Int32List(cols)..fillRange(0, cols, 32);
+    final codepoints = Uint32List(cols)..fillRange(0, cols, 32);
     for (var i = 0; i < rowText.length && i < cols; i++) {
       codepoints[i] = rowText.codeUnitAt(i);
     }
     final line0 = LineCells(
       line: 0,
       codepoints: codepoints,
-      fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
-      bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+      fg: Uint32List(cols)..fillRange(0, cols, 0xD8D8D8),
+      bg: Uint32List(cols)..fillRange(0, cols, 0x181818),
       flags: Uint16List(cols),
-      hyperlinkId: Int32List(cols),
+      hyperlinkId: Uint32List(cols),
     );
     LineCells blank(int i) => LineCells(
           line: i,
-          codepoints: Int32List(cols)..fillRange(0, cols, 32),
-          fg: Int32List(cols)..fillRange(0, cols, 0xD8D8D8),
-          bg: Int32List(cols)..fillRange(0, cols, 0x181818),
+          codepoints: Uint32List(cols)..fillRange(0, cols, 32),
+          fg: Uint32List(cols)..fillRange(0, cols, 0xD8D8D8),
+          bg: Uint32List(cols)..fillRange(0, cols, 0x181818),
           flags: Uint16List(cols),
-          hyperlinkId: Int32List(cols),
+          hyperlinkId: Uint32List(cols),
         );
     return GridUpdate(
       full: true,

@@ -59,9 +59,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   EngineConfig dco_decode_box_autoadd_engine_config(dynamic raw);
 
   @protected
-  CellData dco_decode_cell_data(dynamic raw);
-
-  @protected
   EngineConfig dco_decode_engine_config(dynamic raw);
 
   @protected
@@ -77,13 +74,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   LineUpdate dco_decode_line_update(dynamic raw);
 
   @protected
-  List<CellData> dco_decode_list_cell_data(dynamic raw);
-
-  @protected
   List<EngineEvent> dco_decode_list_engine_event(dynamic raw);
 
   @protected
   List<LineUpdate> dco_decode_list_line_update(dynamic raw);
+
+  @protected
+  Uint16List dco_decode_list_prim_u_16_strict(dynamic raw);
 
   @protected
   Uint32List dco_decode_list_prim_u_32_strict(dynamic raw);
@@ -151,9 +148,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  CellData sse_decode_cell_data(SseDeserializer deserializer);
-
-  @protected
   EngineConfig sse_decode_engine_config(SseDeserializer deserializer);
 
   @protected
@@ -169,13 +163,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   LineUpdate sse_decode_line_update(SseDeserializer deserializer);
 
   @protected
-  List<CellData> sse_decode_list_cell_data(SseDeserializer deserializer);
-
-  @protected
   List<EngineEvent> sse_decode_list_engine_event(SseDeserializer deserializer);
 
   @protected
   List<LineUpdate> sse_decode_list_line_update(SseDeserializer deserializer);
+
+  @protected
+  Uint16List sse_decode_list_prim_u_16_strict(SseDeserializer deserializer);
 
   @protected
   Uint32List sse_decode_list_prim_u_32_strict(SseDeserializer deserializer);
@@ -248,9 +242,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_cell_data(CellData self, SseSerializer serializer);
-
-  @protected
   void sse_encode_engine_config(EngineConfig self, SseSerializer serializer);
 
   @protected
@@ -266,9 +257,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_line_update(LineUpdate self, SseSerializer serializer);
 
   @protected
-  void sse_encode_list_cell_data(List<CellData> self, SseSerializer serializer);
-
-  @protected
   void sse_encode_list_engine_event(
     List<EngineEvent> self,
     SseSerializer serializer,
@@ -277,6 +265,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_line_update(
     List<LineUpdate> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_prim_u_16_strict(
+    Uint16List self,
     SseSerializer serializer,
   );
 

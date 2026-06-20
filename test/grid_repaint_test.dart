@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/render/glyph_cache.dart';
@@ -8,6 +7,8 @@ import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/render/terminal_painter.dart';
 
 int _paintCount = 0;
+int _gridPaints = 0;
+int _cursorPaints = 0;
 
 class _CountingTerminalPainter extends TerminalPainter {
   _CountingTerminalPainter({
@@ -15,7 +16,6 @@ class _CountingTerminalPainter extends TerminalPainter {
     required super.glyphs,
     required super.cellWidth,
     required super.cellHeight,
-    required super.blinkOn,
     required super.selectionColor,
     required super.searchColors,
     required super.hintColors,
@@ -24,6 +24,23 @@ class _CountingTerminalPainter extends TerminalPainter {
   @override
   void paint(Canvas canvas, Size size) {
     _paintCount++;
+    _gridPaints++;
+    super.paint(canvas, size);
+  }
+}
+
+class _CountingCursorPainter extends CursorPainter {
+  _CountingCursorPainter({
+    required super.grid,
+    required super.glyphs,
+    required super.cellWidth,
+    required super.cellHeight,
+    required super.blinkOn,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    _cursorPaints++;
     super.paint(canvas, size);
   }
 }
@@ -39,7 +56,6 @@ void main() {
     final grid = MirrorGrid();
     grid.initializeEmpty(1, 2);
     final glyphs = GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
-    final blinkOn = ValueNotifier(true);
     _paintCount = 0;
 
     await tester.pumpWidget(
@@ -52,7 +68,6 @@ void main() {
             glyphs: glyphs,
             cellWidth: 8,
             cellHeight: 16,
-            blinkOn: blinkOn,
             selectionColor: 0x553A6EA5,
             searchColors: const SearchColors(
               matchBg: 0xAC4242,
@@ -78,9 +93,9 @@ void main() {
       lines: [
         LineCells(
           line: 0,
-          codepoints: Int32List.fromList('xy'.codeUnits),
-          fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8]),
-          bg: Int32List.fromList([0x181818, 0x181818]),
+          codepoints: Uint32List.fromList('xy'.codeUnits),
+          fg: Uint32List.fromList([0xD8D8D8, 0xD8D8D8]),
+          bg: Uint32List.fromList([0x181818, 0x181818]),
           flags: Uint16List.fromList([0, 0]),
         ),
       ],
@@ -96,5 +111,71 @@ void main() {
       reason: 'CustomPaint(repaint: grid) must repaint on notifyListeners '
           'without any setState',
     );
+  });
+
+  // The P1 win: the grid layer no longer depends on the blink Listenable, so a
+  // cursor blink (the common idle event) repaints ONLY the cursor layer — not
+  // the whole grid. This guards against re-merging blink into TerminalPainter.
+  testWidgets('blink toggle repaints cursor layer only, not the grid',
+      (tester) async {
+    final grid = MirrorGrid();
+    grid.initializeEmpty(2, 4);
+    final glyphs = GlyphCache(fontFamily: 'monospace', fontSize: 14, cellWidth: 8);
+    final blinkOn = ValueNotifier(true);
+    _gridPaints = 0;
+    _cursorPaints = 0;
+
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Stack(
+          children: [
+            RepaintBoundary(
+              child: CustomPaint(
+                size: const Size(32, 32),
+                painter: _CountingTerminalPainter(
+                  grid: grid,
+                  glyphs: glyphs,
+                  cellWidth: 8,
+                  cellHeight: 16,
+                  selectionColor: 0x553A6EA5,
+                  searchColors: const SearchColors(
+                    matchBg: 0xAC4242, matchFg: 0x181818,
+                    focusedBg: 0xF4BF75, focusedFg: 0x181818,
+                  ),
+                  hintColors: const HintColors(bg: 0xF4BF75, fg: 0x181818),
+                ),
+              ),
+            ),
+            RepaintBoundary(
+              child: CustomPaint(
+                size: const Size(32, 32),
+                painter: _CountingCursorPainter(
+                  grid: grid,
+                  glyphs: glyphs,
+                  cellWidth: 8,
+                  cellHeight: 16,
+                  blinkOn: blinkOn,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    final gridAfterFirst = _gridPaints;
+    final cursorAfterFirst = _cursorPaints;
+    expect(gridAfterFirst, greaterThan(0));
+    expect(cursorAfterFirst, greaterThan(0));
+
+    // Toggle blink with NO grid mutation: only the cursor layer must repaint.
+    blinkOn.value = false;
+    await tester.pump();
+
+    expect(_cursorPaints, greaterThan(cursorAfterFirst),
+        reason: 'cursor layer must repaint on blink toggle');
+    expect(_gridPaints, gridAfterFirst,
+        reason: 'grid layer must NOT repaint on a blink toggle');
   });
 }

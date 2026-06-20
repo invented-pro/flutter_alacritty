@@ -89,8 +89,8 @@ void main() {
 
     final u = await engineAdvanceAndTakeDamage(engine: engine, bytes: 'hi'.codeUnits);
     final line0 = u.lines.firstWhere((l) => l.line == 0);
-    expect(String.fromCharCode(line0.cells[0].codepoint), 'h');
-    expect(String.fromCharCode(line0.cells[1].codepoint), 'i');
+    expect(String.fromCharCode(line0.codepoints[0]), 'h');
+    expect(String.fromCharCode(line0.codepoints[1]), 'i');
 
     // DSR cursor-position query → a PtyWrite event, drained by polling.
     await engineAdvanceAndTakeDamage(engine: engine, bytes: '\x1b[6n'.codeUnits);
@@ -108,8 +108,8 @@ void main() {
     expect(engineSearchSet(engine: engine, pattern: 'foo'), isTrue);
     const flagCurrent = 1 << 10;
     int focusedCol(RenderUpdate u) {
-      for (var c = 0; c < u.lines[0].cells.length; c++) {
-        if (u.lines[0].cells[c].flags & flagCurrent != 0) return c;
+      for (var c = 0; c < u.lines[0].flags.length; c++) {
+        if (u.lines[0].flags[c] & flagCurrent != 0) return c;
       }
       return -1;
     }
@@ -134,7 +134,7 @@ void main() {
     expect(focusedCol(u), 0, reason: 'prev should move back to col 0');
   });
 
-  test('OSC 8 hyperlink carries hyperlinkId on CellData', () async {
+  test('OSC 8 hyperlink carries hyperlinkId on the columnar line', () async {
     final engine = engineNew(
       columns: 40,
       rows: 3,
@@ -148,8 +148,8 @@ void main() {
     );
     final u2 = engineFullSnapshotSearched(engine: engine);
     final snap = u2.lines.isNotEmpty ? u2 : u;
-    final cell = snap.lines.firstWhere((l) => l.line == 0).cells[0];
-    expect(cell.hyperlinkId, isNonZero);
-    expect(cell.flags & (1 << 11), isNonZero);
+    final line0 = snap.lines.firstWhere((l) => l.line == 0);
+    expect(line0.hyperlinkId[0], isNonZero);
+    expect(line0.flags[0] & (1 << 11), isNonZero);
   });
 }

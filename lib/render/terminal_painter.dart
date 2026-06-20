@@ -83,25 +83,42 @@ class SearchColors {
   final int focusedFg;
 }
 
+/// Applies the sub-cell scroll transform shared by the grid and cursor layers.
+///
+/// When the viewport is scrolled mid-cell, content is shifted down by
+/// `scrollFraction * cellHeight` and clipped to the viewport so the shifted top
+/// row (the overscan line, grid row -1) and the overflowing bottom row are
+/// trimmed. Returns true when a transform was pushed (caller must `restore`).
+/// Only engaged when mid-cell, so the common line-aligned path is untouched.
+bool _pushScrollShift(
+    Canvas canvas, Size size, double frac, int rows, double cellHeight) {
+  if (frac <= 0.0) return false;
+  canvas.save();
+  canvas.clipRect(Rect.fromLTWH(0, 0, size.width, rows * cellHeight));
+  canvas.translate(0, frac * cellHeight);
+  return true;
+}
+
+/// Paints the terminal grid (backgrounds + glyphs + decorations) — everything
+/// except the cursor, which lives on its own [CursorPainter] layer so the blink
+/// timer doesn't repaint the whole grid. Repaints only on grid mutation.
 class TerminalPainter extends CustomPainter {
   TerminalPainter({
     required this.grid,
     required this.glyphs,
     required this.cellWidth,
     required this.cellHeight,
-    required this.blinkOn,
     required this.selectionColor,
     required this.searchColors,
     required this.hintColors,
     this.linkOverlay = LinkOverlay.empty,
   })  : _paintGeneration = grid.generation,
-        super(repaint: Listenable.merge([grid, blinkOn]));
+        super(repaint: grid);
 
   final MirrorGrid grid;
   final GlyphCache glyphs;
   final double cellWidth;
   final double cellHeight;
-  final ValueListenable<bool> blinkOn;
   final int selectionColor;
   final SearchColors searchColors;
   final HintColors hintColors;
@@ -114,18 +131,9 @@ class TerminalPainter extends CustomPainter {
     if (rows == 0 || cols == 0) return;
     glyphs.beginFrame();
 
-    // Sub-cell scroll: shift all content down by `scrollFraction * cellHeight`
-    // and paint one extra row above the top (grid row -1, the overscan line) to
-    // fill the revealed sliver. Clip to the viewport so the shifted top row and
-    // the overflowing bottom row are trimmed. Only engaged when mid-cell, so the
-    // common line-aligned path is untouched.
-    final frac = grid.scrollFraction;
-    final shifted = frac > 0.0;
-    if (shifted) {
-      canvas.save();
-      canvas.clipRect(Rect.fromLTWH(0, 0, size.width, rows * cellHeight));
-      canvas.translate(0, frac * cellHeight);
-    }
+    final shifted =
+        _pushScrollShift(canvas, size, grid.scrollFraction, rows, cellHeight);
+    // The overscan row (grid row -1) fills the sliver revealed by the shift.
     final firstRow = shifted ? -1 : 0;
 
     // Pass 1: backgrounds (so a wide glyph isn't overwritten by the spacer's bg).
@@ -133,39 +141,66 @@ class TerminalPainter extends CustomPainter {
     // edges on adjacent same-color rects leave half-covered seams between every
     // cell — a faint grid, worst on fractional DPR / fractional widget offsets
     // when embedded. Solid pixel-aligned fills tile exactly (matches alacritty's
-    // background quads). Same reasoning for the selection / cursor fills below.
+    // background quads). Same reasoning for the selection / cursor fills.
+    //
+    // Like native alacritty (RenderableCell.bg_alpha == 0 for an untouched
+    // default-bg cell), cells equal to the grid's default bg are NOT filled —
+    // the layer is cleared to the default bg by the host, so we emit rects only
+    // for cells that differ, run-length merging horizontally adjacent same-color
+    // spans into one drawRect. A typical text row drops from `cols` rects to a
+    // handful.
     final bgPaint = Paint()..isAntiAlias = false;
+    final selPaint = Paint()
+      ..isAntiAlias = false
+      ..color = Color(selectionColor);
+    final int defaultBg = grid.defaultBg;
     for (var row = firstRow; row < rows; row++) {
       final y = row * cellHeight;
+      // Run-length merge: accumulate a [runStart, col) span of one color.
+      var runStart = 0;
+      var runColor = -1; // -1 = no open run (a default-bg gap)
+      void flushRun(int endCol) {
+        if (runColor < 0) return;
+        bgPaint.color = Color(0xFF000000 | runColor);
+        canvas.drawRect(
+          Rect.fromLTWH(runStart * cellWidth, y,
+              (endCol - runStart) * cellWidth, cellHeight),
+          bgPaint,
+        );
+        runColor = -1;
+      }
+
       for (var col = 0; col < cols; col++) {
         final flags = grid.flagsAt(row, col);
         final bool overlayLink = linkOverlay.isLinkCell(row, col);
         final int effFlags = overlayLink ? (flags | kFlagHyperlink) : flags;
         final ec = applyMatchOrHint(
           effFlags,
-          effectiveColors(
-            effFlags,
-            grid.fgAt(row, col),
-            grid.bgAt(row, col),
-          ),
+          effectiveColors(effFlags, grid.fgAt(row, col), grid.bgAt(row, col)),
           searchColors,
           hintColors,
         );
-        bgPaint.color = Color(0xFF000000 | ec.bg);
-        canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
+        // Skip the default-bg gap; flush any open run at the boundary.
+        if (ec.bg == defaultBg) {
+          flushRun(col);
+        } else if (ec.bg != runColor) {
+          flushRun(col);
+          runStart = col;
+          runColor = ec.bg;
+        }
+        // Selection overlay is per-cell (translucent), so it can't be merged
+        // into the opaque bg runs; draw it on top of the background.
         if (isSelected(flags)) {
           canvas.drawRect(
-            Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight),
-            Paint()
-              ..isAntiAlias = false
-              ..color = Color(selectionColor),
-          );
+              Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), selPaint);
         }
       }
+      flushRun(cols);
     }
 
     // Pass 2: glyphs / geometry.
     final lineWidth = (cellHeight * 0.08).clamp(1.0, 4.0);
+    final decoPaint = Paint()..strokeWidth = lineWidth;
     var needsWarmupFrame = false;
     for (var row = firstRow; row < rows; row++) {
       final y = row * cellHeight;
@@ -202,9 +237,7 @@ class TerminalPainter extends CustomPainter {
         }
         if (effFlags & (kFlagUnderline | kFlagStrikeout | kFlagHyperlink) != 0) {
           final x = col * cellWidth;
-          final decoPaint = Paint()
-            ..color = fg
-            ..strokeWidth = lineWidth;
+          decoPaint.color = fg;
           final ys = decorationYs(y, cellHeight);
           if (effFlags & (kFlagUnderline | kFlagHyperlink) != 0) {
             canvas.drawLine(
@@ -225,53 +258,6 @@ class TerminalPainter extends CustomPainter {
     }
     if (needsWarmupFrame) SchedulerBinding.instance.scheduleFrame();
 
-    // Pass 3: cursor.
-    final blinkVisible = !grid.cursorBlinking || blinkOn.value;
-    if (grid.cursorVisible && grid.cursorShape != 4 && blinkVisible) {
-      final cr = grid.cursorRow, cc = grid.cursorCol;
-      final inBounds = cr < rows && cc < cols;
-      final flags = inBounds ? grid.flagsAt(cr, cc) : 0;
-      final onWide = flags & kFlagWide != 0;
-      final cw = onWide ? cellWidth * 2 : cellWidth;
-      final x = cc * cellWidth, y = cr * cellHeight;
-      // Cursor ink = the cell's effective fg (an inverse cursor); the glyph is
-      // redrawn in the effective bg so a block cursor reads as a true inversion.
-      final ec = inBounds
-          ? effectiveColors(flags, grid.fgAt(cr, cc), grid.bgAt(cr, cc))
-          : (fg: 0xD8D8D8, bg: 0x181818);
-      final inkColor = cursorInk(grid.cursorColor, ec.fg);
-      final shape = grid.cursorShape;
-      if (shape == 0) {
-        // Block: fill with ink, redraw the cell content in the bg color on top.
-        canvas.drawRect(Rect.fromLTWH(x, y, cw, cellHeight),
-            Paint()..isAntiAlias = false..color = inkColor);
-        final cp = inBounds ? grid.codepointAt(cr, cc) : 32;
-        if (cp != 32 && cp != 0) {
-          final r = Rect.fromLTWH(x, y, cw, cellHeight);
-          final bgInk = Color(0xFF000000 | ec.bg);
-          if (!(isBoxDrawing(cp) && paintBoxGlyph(canvas, r, cp, bgInk, lineWidth))) {
-            final g = glyphs.tryGet(cp, ec.bg,
-                bold: flags & kFlagBold != 0,
-                italic: flags & kFlagItalic != 0,
-                wide: onWide);
-            if (g != null) canvas.drawParagraph(g, Offset(x, y));
-          }
-        }
-      } else if (shape == 3) {
-        // Hollow: stroke the cell outline in the ink color.
-        canvas.drawRect(
-          Rect.fromLTWH(x, y, cw, cellHeight),
-          Paint()
-            ..color = inkColor
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = lineWidth,
-        );
-      } else {
-        // Beam (2) / underline (1): a solid ink-colored bar.
-        final bar = cursorRect(shape, cw, cellHeight, lineWidth).translate(x, y);
-        canvas.drawRect(bar, Paint()..isAntiAlias = false..color = inkColor);
-      }
-    }
     if (shifted) canvas.restore();
   }
 
@@ -282,4 +268,95 @@ class TerminalPainter extends CustomPainter {
       old.cellWidth != cellWidth ||
       old.cellHeight != cellHeight ||
       old.linkOverlay != linkOverlay;
+}
+
+/// Paints only the cursor cell, on a layer above [TerminalPainter]. Repaints on
+/// grid mutation (cursor move) and on [blinkOn] toggles — so an idle blink
+/// re-rasters a single cell instead of the whole grid. The block cursor redraws
+/// the underlying glyph in the cell's bg color, which correctly covers the grid
+/// layer's glyph below it.
+class CursorPainter extends CustomPainter {
+  CursorPainter({
+    required this.grid,
+    required this.glyphs,
+    required this.cellWidth,
+    required this.cellHeight,
+    required this.blinkOn,
+  })  : _paintGeneration = grid.generation,
+        _blink = blinkOn.value,
+        super(repaint: Listenable.merge([grid, blinkOn]));
+
+  final MirrorGrid grid;
+  final GlyphCache glyphs;
+  final double cellWidth;
+  final double cellHeight;
+  final ValueListenable<bool> blinkOn;
+  final int _paintGeneration;
+  final bool _blink;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rows = grid.rows, cols = grid.columns;
+    if (rows == 0 || cols == 0) return;
+    final blinkVisible = !grid.cursorBlinking || blinkOn.value;
+    if (!grid.cursorVisible || grid.cursorShape == 4 || !blinkVisible) return;
+
+    final shifted =
+        _pushScrollShift(canvas, size, grid.scrollFraction, rows, cellHeight);
+    final lineWidth = (cellHeight * 0.08).clamp(1.0, 4.0);
+
+    final cr = grid.cursorRow, cc = grid.cursorCol;
+    final inBounds = cr < rows && cc < cols;
+    final flags = inBounds ? grid.flagsAt(cr, cc) : 0;
+    final onWide = flags & kFlagWide != 0;
+    final cw = onWide ? cellWidth * 2 : cellWidth;
+    final x = cc * cellWidth, y = cr * cellHeight;
+    // Cursor ink = the cell's effective fg (an inverse cursor); the glyph is
+    // redrawn in the effective bg so a block cursor reads as a true inversion.
+    final ec = inBounds
+        ? effectiveColors(flags, grid.fgAt(cr, cc), grid.bgAt(cr, cc))
+        : (fg: 0xD8D8D8, bg: 0x181818);
+    final inkColor = cursorInk(grid.cursorColor, ec.fg);
+    final shape = grid.cursorShape;
+    if (shape == 0) {
+      // Block: fill with ink, redraw the cell content in the bg color on top.
+      canvas.drawRect(Rect.fromLTWH(x, y, cw, cellHeight),
+          Paint()..isAntiAlias = false..color = inkColor);
+      final cp = inBounds ? grid.codepointAt(cr, cc) : 32;
+      if (cp != 32 && cp != 0) {
+        final r = Rect.fromLTWH(x, y, cw, cellHeight);
+        final bgInk = Color(0xFF000000 | ec.bg);
+        if (!(isBoxDrawing(cp) && paintBoxGlyph(canvas, r, cp, bgInk, lineWidth))) {
+          glyphs.beginFrame();
+          final g = glyphs.tryGet(cp, ec.bg,
+              bold: flags & kFlagBold != 0,
+              italic: flags & kFlagItalic != 0,
+              wide: onWide);
+          if (g != null) canvas.drawParagraph(g, Offset(x, y));
+        }
+      }
+    } else if (shape == 3) {
+      // Hollow: stroke the cell outline in the ink color.
+      canvas.drawRect(
+        Rect.fromLTWH(x, y, cw, cellHeight),
+        Paint()
+          ..color = inkColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = lineWidth,
+      );
+    } else {
+      // Beam (2) / underline (1): a solid ink-colored bar.
+      final bar = cursorRect(shape, cw, cellHeight, lineWidth).translate(x, y);
+      canvas.drawRect(bar, Paint()..isAntiAlias = false..color = inkColor);
+    }
+    if (shifted) canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant CursorPainter old) =>
+      old.grid != grid ||
+      old._paintGeneration != _paintGeneration ||
+      old._blink != _blink ||
+      old.cellWidth != cellWidth ||
+      old.cellHeight != cellHeight;
 }

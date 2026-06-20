@@ -9,42 +9,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<TerminalEngine>>
 abstract class TerminalEngine implements RustOpaqueInterface {}
 
-/// Flat, FFI-friendly cell. fg/bg are packed 0x00RRGGBB.
-class CellData {
-  final int codepoint;
-  final int fg;
-  final int bg;
-  final int flags;
-  final int hyperlinkId;
-
-  const CellData({
-    required this.codepoint,
-    required this.fg,
-    required this.bg,
-    required this.flags,
-    required this.hyperlinkId,
-  });
-
-  @override
-  int get hashCode =>
-      codepoint.hashCode ^
-      fg.hashCode ^
-      bg.hashCode ^
-      flags.hashCode ^
-      hyperlinkId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is CellData &&
-          runtimeType == other.runtimeType &&
-          codepoint == other.codepoint &&
-          fg == other.fg &&
-          bg == other.bg &&
-          flags == other.flags &&
-          hyperlinkId == other.hyperlinkId;
-}
-
 /// Color configuration passed from Dart at engine creation.
 /// `palette` is length 18: [0..15] = ANSI colors, [16] = default fg, [17] = default bg
 /// (each packed 0x00RRGGBB). `scrollback` = max history lines.
@@ -87,14 +51,37 @@ class EngineConfig {
           defaultCursorBlinking == other.defaultCursorBlinking;
 }
 
+/// Flat, columnar line for the FFI boundary. Storing each attribute in its own
+/// primitive vector lets flutter_rust_bridge decode them as Dart typed lists
+/// (`Uint32List` / `Uint16List`) in one shot — no per-cell Dart object is
+/// allocated, unlike a `Vec<CellData>` which materializes one object per column.
+/// Built internally from `Vec<CellData>` (which keeps the ergonomic per-cell
+/// engine logic) and packed only at the boundary via [`LineUpdate::from_cells`].
 class LineUpdate {
   final int line;
-  final List<CellData> cells;
+  final Uint32List codepoints;
+  final Uint32List fg;
+  final Uint32List bg;
+  final Uint16List flags;
+  final Uint32List hyperlinkId;
 
-  const LineUpdate({required this.line, required this.cells});
+  const LineUpdate({
+    required this.line,
+    required this.codepoints,
+    required this.fg,
+    required this.bg,
+    required this.flags,
+    required this.hyperlinkId,
+  });
 
   @override
-  int get hashCode => line.hashCode ^ cells.hashCode;
+  int get hashCode =>
+      line.hashCode ^
+      codepoints.hashCode ^
+      fg.hashCode ^
+      bg.hashCode ^
+      flags.hashCode ^
+      hyperlinkId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -102,7 +89,11 @@ class LineUpdate {
       other is LineUpdate &&
           runtimeType == other.runtimeType &&
           line == other.line &&
-          cells == other.cells;
+          codepoints == other.codepoints &&
+          fg == other.fg &&
+          bg == other.bg &&
+          flags == other.flags &&
+          hyperlinkId == other.hyperlinkId;
 }
 
 class RenderUpdate {

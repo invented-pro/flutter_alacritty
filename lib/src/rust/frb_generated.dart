@@ -1124,21 +1124,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  CellData dco_decode_cell_data(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
-    return CellData(
-      codepoint: dco_decode_u_32(arr[0]),
-      fg: dco_decode_u_32(arr[1]),
-      bg: dco_decode_u_32(arr[2]),
-      flags: dco_decode_u_16(arr[3]),
-      hyperlinkId: dco_decode_u_32(arr[4]),
-    );
-  }
-
-  @protected
   EngineConfig dco_decode_engine_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1195,18 +1180,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   LineUpdate dco_decode_line_update(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return LineUpdate(
       line: dco_decode_u_32(arr[0]),
-      cells: dco_decode_list_cell_data(arr[1]),
+      codepoints: dco_decode_list_prim_u_32_strict(arr[1]),
+      fg: dco_decode_list_prim_u_32_strict(arr[2]),
+      bg: dco_decode_list_prim_u_32_strict(arr[3]),
+      flags: dco_decode_list_prim_u_16_strict(arr[4]),
+      hyperlinkId: dco_decode_list_prim_u_32_strict(arr[5]),
     );
-  }
-
-  @protected
-  List<CellData> dco_decode_list_cell_data(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>).map(dco_decode_cell_data).toList();
   }
 
   @protected
@@ -1219,6 +1202,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<LineUpdate> dco_decode_list_line_update(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_line_update).toList();
+  }
+
+  @protected
+  Uint16List dco_decode_list_prim_u_16_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as Uint16List;
   }
 
   @protected
@@ -1368,23 +1357,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  CellData sse_decode_cell_data(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_codepoint = sse_decode_u_32(deserializer);
-    var var_fg = sse_decode_u_32(deserializer);
-    var var_bg = sse_decode_u_32(deserializer);
-    var var_flags = sse_decode_u_16(deserializer);
-    var var_hyperlinkId = sse_decode_u_32(deserializer);
-    return CellData(
-      codepoint: var_codepoint,
-      fg: var_fg,
-      bg: var_bg,
-      flags: var_flags,
-      hyperlinkId: var_hyperlinkId,
-    );
-  }
-
-  @protected
   EngineConfig sse_decode_engine_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_palette = sse_decode_list_prim_u_32_strict(deserializer);
@@ -1451,20 +1423,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   LineUpdate sse_decode_line_update(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_line = sse_decode_u_32(deserializer);
-    var var_cells = sse_decode_list_cell_data(deserializer);
-    return LineUpdate(line: var_line, cells: var_cells);
-  }
-
-  @protected
-  List<CellData> sse_decode_list_cell_data(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <CellData>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_cell_data(deserializer));
-    }
-    return ans_;
+    var var_codepoints = sse_decode_list_prim_u_32_strict(deserializer);
+    var var_fg = sse_decode_list_prim_u_32_strict(deserializer);
+    var var_bg = sse_decode_list_prim_u_32_strict(deserializer);
+    var var_flags = sse_decode_list_prim_u_16_strict(deserializer);
+    var var_hyperlinkId = sse_decode_list_prim_u_32_strict(deserializer);
+    return LineUpdate(
+      line: var_line,
+      codepoints: var_codepoints,
+      fg: var_fg,
+      bg: var_bg,
+      flags: var_flags,
+      hyperlinkId: var_hyperlinkId,
+    );
   }
 
   @protected
@@ -1489,6 +1460,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ans_.add(sse_decode_line_update(deserializer));
     }
     return ans_;
+  }
+
+  @protected
+  Uint16List sse_decode_list_prim_u_16_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getUint16List(len_);
   }
 
   @protected
@@ -1659,16 +1637,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_cell_data(CellData self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_32(self.codepoint, serializer);
-    sse_encode_u_32(self.fg, serializer);
-    sse_encode_u_32(self.bg, serializer);
-    sse_encode_u_16(self.flags, serializer);
-    sse_encode_u_32(self.hyperlinkId, serializer);
-  }
-
-  @protected
   void sse_encode_engine_config(EngineConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_32_strict(self.palette, serializer);
@@ -1723,19 +1691,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_line_update(LineUpdate self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_32(self.line, serializer);
-    sse_encode_list_cell_data(self.cells, serializer);
-  }
-
-  @protected
-  void sse_encode_list_cell_data(
-    List<CellData> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_cell_data(item, serializer);
-    }
+    sse_encode_list_prim_u_32_strict(self.codepoints, serializer);
+    sse_encode_list_prim_u_32_strict(self.fg, serializer);
+    sse_encode_list_prim_u_32_strict(self.bg, serializer);
+    sse_encode_list_prim_u_16_strict(self.flags, serializer);
+    sse_encode_list_prim_u_32_strict(self.hyperlinkId, serializer);
   }
 
   @protected
@@ -1760,6 +1720,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_line_update(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_list_prim_u_16_strict(
+    Uint16List self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer.putUint16List(self);
   }
 
   @protected

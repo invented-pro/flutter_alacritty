@@ -210,7 +210,7 @@ class FrbEngineBinding implements EngineBinding {
       // rows/columns only matter on a full update (MirrorGrid.apply resizes
       // only then); a full snapshot has contiguous viewport lines 0..rows-1.
       rows: u.full ? viewportCount : 0,
-      columns: (u.full && u.lines.isNotEmpty) ? u.lines.first.cells.length : 0,
+      columns: (u.full && u.lines.isNotEmpty) ? u.lines.first.codepoints.length : 0,
       cursorRow: u.cursorLine,
       cursorCol: u.cursorCol,
       cursorVisible: u.cursorVisible,
@@ -227,28 +227,16 @@ class FrbEngineBinding implements EngineBinding {
     );
   }
 
-  LineCells _lineCells(LineUpdate l) {
-    final n = l.cells.length;
-    final codepoints = Int32List(n);
-    final fg = Int32List(n);
-    final bg = Int32List(n);
-    final flags = Uint16List(n);
-    final hyperlinkId = Int32List(n);
-    for (var i = 0; i < n; i++) {
-      final c = l.cells[i];
-      codepoints[i] = c.codepoint;
-      fg[i] = c.fg;
-      bg[i] = c.bg;
-      flags[i] = c.flags;
-      hyperlinkId[i] = c.hyperlinkId;
-    }
-    return LineCells(
-      line: l.line,
-      codepoints: codepoints,
-      fg: fg,
-      bg: bg,
-      flags: flags,
-      hyperlinkId: hyperlinkId,
-    );
-  }
+  // Zero-copy passthrough: FRB decodes the FFI `LineUpdate`'s columnar Vec<u32>/
+  // Vec<u16> directly into Dart typed lists, which are exactly the types
+  // `LineCells` (and the MirrorGrid storage) hold — so there's no per-cell
+  // object and no per-field copy here, unlike the old `Vec<CellData>` layout.
+  LineCells _lineCells(LineUpdate l) => LineCells(
+        line: l.line,
+        codepoints: l.codepoints,
+        fg: l.fg,
+        bg: l.bg,
+        flags: l.flags,
+        hyperlinkId: l.hyperlinkId,
+      );
 }

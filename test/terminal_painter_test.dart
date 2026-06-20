@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/links/link_overlay.dart';
@@ -10,7 +9,6 @@ import 'package:flutter_alacritty/render/glyph_cache.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/render/terminal_painter.dart';
 
-final _steadyBlink = ValueNotifier(true);
 
 class _RecordingGlyphCache extends GlyphCache {
   _RecordingGlyphCache()
@@ -53,9 +51,9 @@ void main() {
       lines: [
         LineCells(
           line: 0,
-          codepoints: Int32List.fromList('中X'.codeUnits),
-          fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8]),
-          bg: Int32List.fromList([0x181818, 0x181818]),
+          codepoints: Uint32List.fromList('中X'.codeUnits),
+          fg: Uint32List.fromList([0xD8D8D8, 0xD8D8D8]),
+          bg: Uint32List.fromList([0x181818, 0x181818]),
           flags: Uint16List.fromList([kFlagWide, kFlagWideSpacer]),
         ),
       ],
@@ -72,7 +70,6 @@ void main() {
             glyphs: glyphs,
             cellWidth: 8,
             cellHeight: 16,
-            blinkOn: _steadyBlink,
             selectionColor: 0x553A6EA5,
             searchColors: const SearchColors(
               matchBg: 0xAC4242,
@@ -97,9 +94,9 @@ void main() {
       lines: [
         LineCells(
           line: 0,
-          codepoints: Int32List.fromList('ab'.codeUnits),
-          fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8]),
-          bg: Int32List.fromList([0x181818, 0x181818]),
+          codepoints: Uint32List.fromList('ab'.codeUnits),
+          fg: Uint32List.fromList([0xD8D8D8, 0xD8D8D8]),
+          bg: Uint32List.fromList([0x181818, 0x181818]),
           flags: Uint16List.fromList([kFlagSelected, 0]),
         ),
       ],
@@ -182,9 +179,9 @@ void main() {
       lines: [
         LineCells(
           line: 0,
-          codepoints: Int32List.fromList('abc'.codeUnits),
-          fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8, 0xD8D8D8]),
-          bg: Int32List.fromList([0x181818, 0x181818, 0x181818]),
+          codepoints: Uint32List.fromList('abc'.codeUnits),
+          fg: Uint32List.fromList([0xD8D8D8, 0xD8D8D8, 0xD8D8D8]),
+          bg: Uint32List.fromList([0x181818, 0x181818, 0x181818]),
           // No kFlagHyperlink in grid flags for any cell.
           flags: Uint16List.fromList([0, 0, 0]),
         ),
@@ -207,7 +204,6 @@ void main() {
           glyphs: glyphs,
           cellWidth: 8,
           cellHeight: 16,
-          blinkOn: _steadyBlink,
           selectionColor: 0x553A6EA5,
           searchColors: const SearchColors(
             matchBg: 0xAC4242,
@@ -274,9 +270,9 @@ void main() {
       lines: [
         LineCells(
           line: 0,
-          codepoints: Int32List.fromList('abc'.codeUnits),
-          fg: Int32List.fromList([baseFg, baseFg, baseFg]),
-          bg: Int32List.fromList([baseBg, baseBg, baseBg]),
+          codepoints: Uint32List.fromList('abc'.codeUnits),
+          fg: Uint32List.fromList([baseFg, baseFg, baseFg]),
+          bg: Uint32List.fromList([baseBg, baseBg, baseBg]),
           // No kFlagHyperlink on any cell — col 1 is a link via overlay only.
           flags: Uint16List.fromList([0, 0, 0]),
         ),
@@ -299,7 +295,6 @@ void main() {
           glyphs: glyphsA,
           cellWidth: 8,
           cellHeight: 16,
-          blinkOn: _steadyBlink,
           selectionColor: 0x553A6EA5,
           searchColors: searchColors,
           hintColors: hintColors,
@@ -337,9 +332,9 @@ void main() {
       lines: [
         LineCells(
           line: 0,
-          codepoints: Int32List.fromList('abc'.codeUnits),
-          fg: Int32List.fromList([baseFg, baseFg, baseFg]),
-          bg: Int32List.fromList([baseBg, baseBg, baseBg]),
+          codepoints: Uint32List.fromList('abc'.codeUnits),
+          fg: Uint32List.fromList([baseFg, baseFg, baseFg]),
+          bg: Uint32List.fromList([baseBg, baseBg, baseBg]),
           // Col 1 carries a real kFlagHyperlink.
           flags: Uint16List.fromList([0, kFlagHyperlink, 0]),
         ),
@@ -359,7 +354,6 @@ void main() {
           glyphs: glyphsB,
           cellWidth: 8,
           cellHeight: 16,
-          blinkOn: _steadyBlink,
           selectionColor: 0x553A6EA5,
           searchColors: searchColors,
           hintColors: hintColors,

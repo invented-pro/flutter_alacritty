@@ -5,9 +5,9 @@ import 'package:flutter_alacritty/render/mirror_grid.dart';
 
 LineCells row(int line, String text, {List<int>? flags}) => LineCells(
       line: line,
-      codepoints: Int32List.fromList(text.codeUnits),
-      fg: Int32List.fromList(List.filled(text.length, 0xD8D8D8)),
-      bg: Int32List.fromList(List.filled(text.length, 0x181818)),
+      codepoints: Uint32List.fromList(text.codeUnits),
+      fg: Uint32List.fromList(List.filled(text.length, 0xD8D8D8)),
+      bg: Uint32List.fromList(List.filled(text.length, 0x181818)),
       flags: Uint16List.fromList(flags ?? List.filled(text.length, 0)),
     );
 
@@ -129,7 +129,7 @@ void main() {
   test('partial line wider than viewport clamps without throwing', () {
     final g = MirrorGrid();
     g.initializeEmpty(2, 10);
-    final wide = Int32List(15)..fillRange(0, 15, 65); // 'A' × 15
+    final wide = Uint32List(15)..fillRange(0, 15, 65); // 'A' × 15
     g.apply(GridUpdate(
       full: false,
       rows: 1,
@@ -138,8 +138,8 @@ void main() {
         LineCells(
           line: 0,
           codepoints: wide,
-          fg: Int32List(15),
-          bg: Int32List(15),
+          fg: Uint32List(15),
+          bg: Uint32List(15),
           flags: Uint16List(15),
         ),
       ],
@@ -158,11 +158,11 @@ void main() {
       full: true, rows: 1, columns: 3,
       lines: [LineCells(
         line: 0,
-        codepoints: Int32List.fromList([0x41, 0x42, 0x43]),
-        fg: Int32List.fromList([0xD8D8D8, 0xD8D8D8, 0xD8D8D8]),
-        bg: Int32List.fromList([0x181818, 0x181818, 0x181818]),
+        codepoints: Uint32List.fromList([0x41, 0x42, 0x43]),
+        fg: Uint32List.fromList([0xD8D8D8, 0xD8D8D8, 0xD8D8D8]),
+        bg: Uint32List.fromList([0x181818, 0x181818, 0x181818]),
         flags: Uint16List.fromList([0, kFlagHyperlink, kFlagHyperlink]),
-        hyperlinkId: Int32List.fromList([0, 7, 7]),
+        hyperlinkId: Uint32List.fromList([0, 7, 7]),
       )],
       cursorRow: 0, cursorCol: 0, cursorVisible: false,
     ));

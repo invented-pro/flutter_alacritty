@@ -914,30 +914,53 @@ class TerminalViewState extends State<TerminalView>
               onLongPressEnd: _onLongPressEnd,
               child: Stack(
                 children: [
+                  // Grid layer: repaints only on grid mutation. Its own
+                  // RepaintBoundary keeps its raster isolated so the cursor /
+                  // bell / preedit layers above don't dirty it, and vice versa.
                   MouseRegion(
                     cursor: _hoverCursor,
                     onHover: (e) => _updateHoverCursor(e.localPosition),
-                    child: CustomPaint(
-                      size: Size.infinite,
-                      painter: TerminalPainter(
-                        grid: _grid,
-                        glyphs: _glyphs,
-                        cellWidth: _metrics.width,
-                        cellHeight: _metrics.height,
-                        blinkOn: _blinkOn,
-                        selectionColor:
-                            0x55000000 | (widget.theme.selection & 0xFFFFFF),
-                        searchColors: SearchColors(
-                          matchBg: widget.theme.searchMatch.bg,
-                          matchFg: widget.theme.searchMatch.fg,
-                          focusedBg: widget.theme.searchFocused.bg,
-                          focusedFg: widget.theme.searchFocused.fg,
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        size: Size.infinite,
+                        isComplex: true,
+                        willChange: true,
+                        painter: TerminalPainter(
+                          grid: _grid,
+                          glyphs: _glyphs,
+                          cellWidth: _metrics.width,
+                          cellHeight: _metrics.height,
+                          selectionColor:
+                              0x55000000 | (widget.theme.selection & 0xFFFFFF),
+                          searchColors: SearchColors(
+                            matchBg: widget.theme.searchMatch.bg,
+                            matchFg: widget.theme.searchMatch.fg,
+                            focusedBg: widget.theme.searchFocused.bg,
+                            focusedFg: widget.theme.searchFocused.fg,
+                          ),
+                          hintColors: HintColors(
+                            bg: widget.theme.hintStart.bg,
+                            fg: widget.theme.hintStart.fg,
+                          ),
+                          linkOverlay: _linkOverlay,
                         ),
-                        hintColors: HintColors(
-                          bg: widget.theme.hintStart.bg,
-                          fg: widget.theme.hintStart.fg,
+                      ),
+                    ),
+                  ),
+                  // Cursor layer: a single cell, on its own RepaintBoundary, so
+                  // the blink timer re-rasters only the cursor — not the grid.
+                  IgnorePointer(
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        size: Size.infinite,
+                        willChange: true,
+                        painter: CursorPainter(
+                          grid: _grid,
+                          glyphs: _glyphs,
+                          cellWidth: _metrics.width,
+                          cellHeight: _metrics.height,
+                          blinkOn: _blinkOn,
                         ),
-                        linkOverlay: _linkOverlay,
                       ),
                     ),
                   ),

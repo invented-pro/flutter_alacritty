@@ -14,15 +14,18 @@ class LineCells {
     required this.fg,
     required this.bg,
     required this.flags,
-    Int32List? hyperlinkId,
-  }) : hyperlinkId = hyperlinkId ?? Int32List(codepoints.length);
+    Uint32List? hyperlinkId,
+  }) : hyperlinkId = hyperlinkId ?? Uint32List(codepoints.length);
 
   final int line;
-  final Int32List codepoints;
-  final Int32List fg;
-  final Int32List bg;
+  // Columnar, matching the FFI `LineUpdate` (Vec<u32>/Vec<u16>) so the engine
+  // binding passes the FRB-decoded typed lists straight through with no per-cell
+  // copy. fg/bg are packed 0x00RRGGBB; codepoints are Unicode scalar values.
+  final Uint32List codepoints;
+  final Uint32List fg;
+  final Uint32List bg;
   final Uint16List flags;
-  final Int32List hyperlinkId;
+  final Uint32List hyperlinkId;
 }
 
 /// A render update: either a full replace or a set of changed lines.
@@ -129,11 +132,11 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   int _generation = 0;
   int _rows = 0;
   int _columns = 0;
-  List<Int32List> _codepoints = [];
-  List<Int32List> _fg = [];
-  List<Int32List> _bg = [];
+  List<Uint32List> _codepoints = [];
+  List<Uint32List> _fg = [];
+  List<Uint32List> _bg = [];
   List<Uint16List> _flags = [];
-  List<Int32List> _hyperlinkId = [];
+  List<Uint32List> _hyperlinkId = [];
   int _cursorRow = 0;
   int _cursorCol = 0;
   bool _cursorVisible = false;
@@ -144,11 +147,11 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   double _scrollFraction = 0;
   // Overscan line (row -1): the row just above the viewport top, painted in the
   // sliver revealed when _scrollFraction > 0. Always sized to _columns.
-  Int32List _overCodepoints = Int32List(0);
-  Int32List _overFg = Int32List(0);
-  Int32List _overBg = Int32List(0);
+  Uint32List _overCodepoints = Uint32List(0);
+  Uint32List _overFg = Uint32List(0);
+  Uint32List _overBg = Uint32List(0);
   Uint16List _overFlags = Uint16List(0);
-  Int32List _overHyperlinkId = Int32List(0);
+  Uint32List _overHyperlinkId = Uint32List(0);
 
   /// Bumps on every [apply] / [initializeEmpty]; used by [TerminalPainter.shouldRepaint].
   @override
@@ -177,6 +180,12 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   @override
   double get scrollFraction => _scrollFraction;
 
+  /// The grid's current default background (packed 0x00RRGGBB). The painter
+  /// skips filling cells equal to this — the layer is cleared to it by the host
+  /// — mirroring native alacritty's `bg_alpha == 0` for untouched default cells.
+  int get defaultBg => _defaultBg;
+  int get defaultFg => _defaultFg;
+
   @override
   int codepointAt(int row, int col) =>
       row < 0 ? _overCodepoints[col] : _codepoints[row][col];
@@ -195,16 +204,16 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
     if (rows == _rows && columns == _columns) return;
     _rows = rows;
     _columns = columns;
-    _codepoints = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, 32));
-    _fg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, _defaultFg));
-    _bg = List.generate(rows, (_) => Int32List(columns)..fillRange(0, columns, _defaultBg));
+    _codepoints = List.generate(rows, (_) => Uint32List(columns)..fillRange(0, columns, 32));
+    _fg = List.generate(rows, (_) => Uint32List(columns)..fillRange(0, columns, _defaultFg));
+    _bg = List.generate(rows, (_) => Uint32List(columns)..fillRange(0, columns, _defaultBg));
     _flags = List.generate(rows, (_) => Uint16List(columns));
-    _hyperlinkId = List.generate(rows, (_) => Int32List(columns));
-    _overCodepoints = Int32List(columns)..fillRange(0, columns, 32);
-    _overFg = Int32List(columns)..fillRange(0, columns, _defaultFg);
-    _overBg = Int32List(columns)..fillRange(0, columns, _defaultBg);
+    _hyperlinkId = List.generate(rows, (_) => Uint32List(columns));
+    _overCodepoints = Uint32List(columns)..fillRange(0, columns, 32);
+    _overFg = Uint32List(columns)..fillRange(0, columns, _defaultFg);
+    _overBg = Uint32List(columns)..fillRange(0, columns, _defaultBg);
     _overFlags = Uint16List(columns);
-    _overHyperlinkId = Int32List(columns);
+    _overHyperlinkId = Uint32List(columns);
   }
 
   /// Empty viewport for startup — avoids a sync full_snapshot FFI round-trip.
