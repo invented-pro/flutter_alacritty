@@ -217,7 +217,9 @@ void main() {
 /// while a GARBLED one (glyphs sampled from the wrong slot — the bug this guards)
 /// keeps a large block difference.
 Future<void> _assertConverges(ui.Image pImg, ui.Image aImg, String label) async {
-  final w = pImg.width, h = aImg.height;
+  expect(aImg.width, pImg.width);
+  expect(aImg.height, pImg.height);
+  final w = pImg.width, h = pImg.height;
   final p = (await pImg.toByteData(format: ui.ImageByteFormat.rawRgba))!.buffer.asUint8List();
   final a = (await aImg.toByteData(format: ui.ImageByteFormat.rawRgba))!.buffer.asUint8List();
 

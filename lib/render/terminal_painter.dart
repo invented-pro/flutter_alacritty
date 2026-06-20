@@ -257,11 +257,17 @@ class TerminalPainter extends CustomPainter {
           if (atlas.request(key)) {
             atlas.addSprite(key, col * cellWidth, y, 0xFF000000 | ec.fg);
           } else {
-            needsWarmupFrame = true;
+            // Not yet atlased (queued for next frame) or past the atlas cap
+            // (permanent fallback): draw via paragraph. Only reschedule when the
+            // cache itself couldn't build the glyph this frame — `atlas.hasPending`
+            // (checked after the loop) covers the queued case, so a capped glyph
+            // doesn't spin scheduleFrame forever.
             final paragraph =
                 glyphs.tryGet(cp, ec.fg, bold: bold, italic: italic, wide: wide);
             if (paragraph != null) {
               canvas.drawParagraph(paragraph, Offset(col * cellWidth, y));
+            } else {
+              needsWarmupFrame = true;
             }
           }
         } else {

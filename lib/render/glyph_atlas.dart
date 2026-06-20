@@ -30,8 +30,20 @@ class GlyphAtlas {
     this.boldItalicFamily,
     this.lineHeight = 1.0,
     this.columns = 32,
+    this.maxTextureDimension = 4096,
   })  : _slotPhysW = (cellWidth * 2 * devicePixelRatio).ceil(),
-        _slotPhysH = (cellHeight * devicePixelRatio).ceil();
+        _slotPhysH = (cellHeight * devicePixelRatio).ceil() {
+    // Cap the glyph set so the atlas image never exceeds the GPU's max texture
+    // dimension (4096 is safe on essentially all targets). The width is fixed
+    // (columns × slot), so only height grows; bound it to `maxRows` rows. Glyphs
+    // past the cap fall back to the per-cell drawParagraph path (handled by the
+    // painter) — common glyphs (ASCII + on-screen CJK) get atlased, a pathological
+    // flood of distinct glyphs degrades gracefully instead of garbling.
+    final maxRows = (maxTextureDimension ~/ _slotPhysH).clamp(1, 1 << 20);
+    _maxSlots = maxRows * columns;
+  }
+
+  final int maxTextureDimension;
 
   final String fontFamily;
   final String? boldFamily;
@@ -49,11 +61,16 @@ class GlyphAtlas {
 
   final int _slotPhysW;
   final int _slotPhysH;
+  late final int _maxSlots;
 
   ui.Image? _image;
   final Map<int, int> _slotIndex = {}; // key -> slot ordinal
   final Set<int> _pending = {};
   int _generation = 0;
+
+  /// Max distinct glyphs the atlas can hold before overflow falls back to
+  /// drawParagraph (derived from [maxTextureDimension]). Exposed for tests.
+  int get capacity => _maxSlots;
 
   // Reusable per-frame batch scratch (avoids allocating ~30KB/frame). 4 floats
   // per sprite for the RSTransform and source rect, 1 int for the tint color.
@@ -83,8 +100,12 @@ class GlyphAtlas {
 
   /// Records that [key] is needed; it gets a slot on the next [rebuildIfNeeded].
   /// Returns false if the glyph isn't available yet (painter should fall back).
+  /// Once the atlas is at [capacity], new glyphs are NOT queued — they fall back
+  /// permanently to drawParagraph, so `hasPending` stays false and the painter
+  /// doesn't spin scheduling frames for glyphs that will never get a slot.
   bool request(int key) {
     if (_slotIndex.containsKey(key)) return true;
+    if (_slotIndex.length + _pending.length >= _maxSlots) return false;
     _pending.add(key);
     return false;
   }
@@ -143,39 +164,45 @@ class GlyphAtlas {
   }
 
   /// Rebuilds the atlas image if new glyphs were [request]ed. Synchronous
-  /// (`toImageSync`); cheap because it only runs when the glyph set grows.
-  /// Returns true if a rebuild happened (painter should repaint).
+  /// (`toImageSync`). Growth is INCREMENTAL — the previous image is blitted into
+  /// the (possibly taller) new image and only the newly-assigned glyphs are
+  /// rasterized — so a rebuild is O(new glyphs), not O(all). Returns true if a
+  /// rebuild happened (painter should repaint).
   bool rebuildIfNeeded() {
     if (_pending.isEmpty) return false;
-    // Assign slots to all pending keys after the existing ones.
-    final keys = <int>[];
+    // Assign slots to the pending keys after the existing ones (cap already
+    // enforced in `request`, so this never exceeds [_maxSlots]).
+    final newKeys = <int>[];
     for (final k in _pending) {
       if (!_slotIndex.containsKey(k)) {
         _slotIndex[k] = _slotIndex.length;
-        keys.add(k);
+        newKeys.add(k);
       }
     }
     _pending.clear();
-    if (keys.isEmpty && _image != null) return false;
+    if (newKeys.isEmpty) return false;
 
-    final total = _slotIndex.length;
-    final rows = (total / columns).ceil();
+    final rows = (_slotIndex.length / columns).ceil();
     final physW = columns * _slotPhysW;
     final physH = rows * _slotPhysH;
 
     final rec = ui.PictureRecorder();
     final canvas = ui.Canvas(rec);
-    // Re-render every known glyph (the old image is discarded). The glyph set is
-    // small (a few hundred for a terminal), so a full redraw on growth is fine.
-    //
-    // Each glyph is translated to its INTEGER physical slot origin and then
-    // scaled by dpr — NOT a single global scale with logical offsets. Otherwise,
-    // when `slotW*dpr` isn't an integer (fractional cell metrics / fractional
-    // DPR), the glyph's rendered position (col*slotLogicalW*dpr) drifts from the
-    // source rect the painter samples (col*ceil(slotW*dpr)), and the drift grows
-    // per column/row — glyphs get sampled from neighboring slots and render as
-    // garbage. Anchoring to the integer slot origin makes them match exactly.
-    _slotIndex.forEach((key, slot) {
+    // Blit the existing atlas (1:1, same physical resolution) so we don't
+    // re-rasterize glyphs that already have slots; new rows below stay blank.
+    final old = _image;
+    if (old != null) {
+      canvas.drawImage(old, ui.Offset.zero, ui.Paint());
+    }
+    // Render ONLY the newly-assigned glyphs. Each is translated to its INTEGER
+    // physical slot origin then scaled by dpr — NOT a single global scale with
+    // logical offsets. Otherwise, when `slotW*dpr` isn't an integer (fractional
+    // cell metrics / fractional DPR), the rendered position drifts from the
+    // source rect the painter samples (`col*ceil(slotW*dpr)`) and the drift
+    // compounds per column/row — glyphs get sampled from neighboring slots and
+    // render as garbage. Anchoring to the integer slot origin makes them match.
+    for (final key in newKeys) {
+      final slot = _slotIndex[key]!;
       final col = slot % columns;
       final row = slot ~/ columns;
       canvas.save();
@@ -183,11 +210,11 @@ class GlyphAtlas {
       canvas.scale(devicePixelRatio);
       _paintGlyph(canvas, key, 0, 0);
       canvas.restore();
-    });
+    }
     final pic = rec.endRecording();
     final img = pic.toImageSync(math.max(physW, 1), math.max(physH, 1));
     pic.dispose();
-    _image?.dispose();
+    old?.dispose();
     _image = img;
     _generation++;
     return true;
