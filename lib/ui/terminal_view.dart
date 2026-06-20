@@ -29,6 +29,7 @@ import '../links/terminal_link_provider.dart';
 import '../links/url_link_provider.dart';
 import '../render/cell_flags.dart';
 import '../render/cell_metrics.dart';
+import '../render/glyph_atlas.dart';
 import '../render/glyph_cache.dart';
 import '../render/mirror_grid.dart';
 import '../render/terminal_painter.dart';
@@ -218,6 +219,12 @@ class TerminalViewState extends State<TerminalView>
   late TextStyle _style;
   late CellMetrics _metrics;
   late GlyphCache _glyphs;
+  // GPU glyph atlas for the grid layer: one drawRawAtlas per frame instead of
+  // per-cell drawParagraph. Created lazily in build() (needs devicePixelRatio
+  // from context) and rebuilt when the font metrics or DPR change. The cursor
+  // layer keeps using [_glyphs] (a single glyph, not worth atlasing).
+  GlyphAtlas? _atlas;
+  double _atlasDpr = 0;
 
   final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
   Timer? _blinkTimer;
@@ -400,6 +407,7 @@ class TerminalViewState extends State<TerminalView>
         widget.engine.setCellPixels(
             _metrics.width.round(), _metrics.height.round());
         _glyphs = _newGlyphCache();
+        _disposeAtlas(); // rebuilt lazily in build() with the new metrics
       });
     }
     if (!identical(widget.linkProviders, oldWidget.linkProviders)) {
@@ -424,6 +432,32 @@ class TerminalViewState extends State<TerminalView>
         lineHeight: widget.textStyle.lineHeight,
       );
 
+  /// Ensures [_atlas] exists and matches the current font metrics and [dpr].
+  /// Cheap no-op once built; recreated only when the cache was invalidated
+  /// (font zoom / style change null it) or the device pixel ratio changes.
+  void _ensureAtlas(double dpr) {
+    if (_atlas != null && _atlasDpr == dpr) return;
+    _atlas?.dispose();
+    _atlasDpr = dpr;
+    _atlas = GlyphAtlas(
+      fontFamily: widget.textStyle.family,
+      fontFamilyFallback: widget.textStyle.fallback,
+      boldFamily: widget.textStyle.boldFamily,
+      italicFamily: widget.textStyle.italicFamily,
+      boldItalicFamily: widget.textStyle.boldItalicFamily,
+      fontSize: _fontSize,
+      cellWidth: _metrics.width,
+      cellHeight: _metrics.height,
+      lineHeight: widget.textStyle.lineHeight,
+      devicePixelRatio: dpr,
+    );
+  }
+
+  void _disposeAtlas() {
+    _atlas?.dispose();
+    _atlas = null;
+  }
+
   @override
   void dispose() {
     _stopFling();
@@ -437,6 +471,7 @@ class TerminalViewState extends State<TerminalView>
     if (_ownsController) _controller.dispose();
     _bellCtrl.dispose();
     _glyphs.dispose();
+    _disposeAtlas();
     _grid.removeListener(_scheduleLinkRecompute);
     for (final p in widget.linkProviders) {
       p.removeListener(_scheduleLinkRecompute);
@@ -529,6 +564,7 @@ class TerminalViewState extends State<TerminalView>
       _metrics = CellMetrics.measure(_style);
       widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
       _glyphs = _newGlyphCache();
+      _disposeAtlas(); // rebuilt lazily in build() with the new metrics
     });
   }
 
@@ -875,6 +911,7 @@ class TerminalViewState extends State<TerminalView>
         final cols = (availW / _metrics.width).floor().clamp(kMinTerminalColumns, 1000);
         final rows = (availH / _metrics.height).floor().clamp(kMinTerminalRows, 1000);
         _ensureSizing(cols, rows);
+        _ensureAtlas(MediaQuery.devicePixelRatioOf(context));
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _reportCaretRectToIme());
         Widget tree = Listener(
@@ -943,6 +980,7 @@ class TerminalViewState extends State<TerminalView>
                             fg: widget.theme.hintStart.fg,
                           ),
                           linkOverlay: _linkOverlay,
+                          atlas: _atlas,
                         ),
                       ),
                     ),

@@ -6,7 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_alacritty/render/cell_flags.dart';
+import 'package:flutter_alacritty/render/glyph_atlas.dart';
 import 'package:flutter_alacritty/render/glyph_cache.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/render/terminal_painter.dart';
@@ -29,6 +29,8 @@ class _CountingCanvas implements Canvas {
   int rects = 0;
   int paragraphs = 0;
   int lines = 0;
+  int atlasCalls = 0;
+  int atlasSprites = 0;
 
   @override
   void drawRect(ui.Rect rect, ui.Paint paint) => rects++;
@@ -36,6 +38,12 @@ class _CountingCanvas implements Canvas {
   void drawParagraph(ui.Paragraph paragraph, ui.Offset offset) => paragraphs++;
   @override
   void drawLine(ui.Offset p1, ui.Offset p2, ui.Paint paint) => lines++;
+  @override
+  void drawRawAtlas(ui.Image atlas, Float32List rstTransforms, Float32List rects_,
+      Int32List? colors, ui.BlendMode? blendMode, ui.Rect? cullRect, ui.Paint paint) {
+    atlasCalls++;
+    atlasSprites += rstTransforms.length ~/ 4;
+  }
 
   // Everything else the painter calls (save/restore/translate/clipRect/…) is a
   // no-op for counting purposes.
@@ -93,7 +101,8 @@ MirrorGrid _grid(
   return grid;
 }
 
-TerminalPainter _painter(MirrorGrid grid, GlyphCache glyphs) => TerminalPainter(
+TerminalPainter _painter(MirrorGrid grid, GlyphCache glyphs, {GlyphAtlas? atlas}) =>
+    TerminalPainter(
       grid: grid,
       glyphs: glyphs,
       cellWidth: 8,
@@ -104,15 +113,21 @@ TerminalPainter _painter(MirrorGrid grid, GlyphCache glyphs) => TerminalPainter(
         focusedBg: 0xF4BF75, focusedFg: 0x181818,
       ),
       hintColors: const HintColors(bg: 0xF4BF75, fg: 0x181818),
+      atlas: atlas,
     );
 
-void _report(String name, MirrorGrid grid) {
+void _report(String name, MirrorGrid grid, {bool useAtlas = false}) {
   final glyphs = _warmCache();
-  final painter = _painter(grid, glyphs);
+  final atlas = useAtlas
+      ? GlyphAtlas(
+          fontFamily: 'monospace', fontSize: 14, cellWidth: 8, cellHeight: 16,
+          devicePixelRatio: 1.0)
+      : null;
+  final painter = _painter(grid, glyphs, atlas: atlas);
   const size = ui.Size(_cols * 8.0, _rows * 16.0);
 
-  // Warm the glyph cache (build every paragraph) over a couple of real paints.
-  for (var i = 0; i < 3; i++) {
+  // Warm caches/atlas (the atlas needs a couple of frames to build all glyphs).
+  for (var i = 0; i < 4; i++) {
     final rec = ui.PictureRecorder();
     painter.paint(Canvas(rec), size);
     rec.endRecording().dispose();
@@ -134,11 +149,11 @@ void _report(String name, MirrorGrid grid) {
   final usPerFrame = sw.elapsedMicroseconds / n;
 
   // ignore: avoid_print
-  print('[$name] ${_cols}x$_rows  '
+  print('[$name${useAtlas ? ' +ATLAS' : ''}] ${_cols}x$_rows  '
       'drawRect=${counter.rects}  drawParagraph=${counter.paragraphs}  '
+      'drawRawAtlas=${counter.atlasCalls}(${counter.atlasSprites} sprites)  '
       'drawLine=${counter.lines}  '
-      'paint=${usPerFrame.toStringAsFixed(1)}us/frame  '
-      '(old bg floor would be ${_rows * _cols} rects)');
+      'paint=${usPerFrame.toStringAsFixed(1)}us/frame');
 }
 
 void main() {
@@ -167,9 +182,10 @@ void main() {
 
   test('scenario C — dense text, default bg (drawParagraph-bound)', () {
     // Full screen of glyphs on the default bg: near-zero background rects, ~all
-    // cells emit a glyph → this is the drawParagraph count P4 would collapse.
+    // cells emit a glyph → this is the drawParagraph count P4 collapses.
     final grid = _grid((r, c) => 33 + ((r * 80 + c) % 94)); // printable ASCII
     _report('C dense-text', grid);
+    _report('C dense-text', grid, useAtlas: true); // 1920 drawParagraph -> 1 drawRawAtlas
   });
 
   test('scenario D — worst case: dense text + per-cell alternating bg', () {
@@ -180,5 +196,6 @@ void main() {
       bg: (r, c) => (c % 2 == 0) ? 0x402020 : 0x204020,
     );
     _report('D worst-case', grid);
+    _report('D worst-case', grid, useAtlas: true);
   });
 }

@@ -1,0 +1,261 @@
+@Tags(['visual'])
+library;
+
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_alacritty/render/cell_flags.dart';
+import 'package:flutter_alacritty/render/glyph_atlas.dart';
+import 'package:flutter_alacritty/render/glyph_cache.dart';
+import 'package:flutter_alacritty/render/mirror_grid.dart';
+import 'package:flutter_alacritty/render/terminal_painter.dart';
+
+/// Headless visual-verification harness. Loads a REAL monospace TTF (so glyphs
+/// are actual shapes, not the test font's boxes), renders a representative grid
+/// through the painter to a PNG, and writes it to /tmp for inspection.
+///
+/// This is the P4 oracle: the atlas (drawRawAtlas) path must produce a visually
+/// identical image to the per-cell drawParagraph path. Run with:
+///   flutter test --tags visual test/visual_render_test.dart
+///
+/// Tagged `visual` so it stays out of the normal suite.
+
+const _mono = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf';
+const _monoBold = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf';
+const _cjk = '/usr/share/fonts/truetype/arphic/uming.ttc';
+
+Future<void> _loadFont(String family, String path) async {
+  final bytes = File(path).readAsBytesSync();
+  final loader = FontLoader(family)
+    ..addFont(Future.value(ByteData.view(Uint8List.fromList(bytes).buffer)));
+  await loader.load();
+}
+
+const int _defaultFg = 0xD8D8D8;
+const int _defaultBg = 0x181818;
+
+/// A rich scene exercising the paths that matter for P4 correctness:
+/// plain text, colored fg, colored bg block, bold, italic, underline,
+/// strikeout, a CJK wide pair, a selection span, and the cursor.
+MirrorGrid _scene(int cols, int rows) {
+  final grid = MirrorGrid(defaultFg: _defaultFg, defaultBg: _defaultBg);
+  final lines = <LineCells>[];
+  LineCells row(String text, {int Function(int c)? fg, int Function(int c)? bg, int Function(int c)? fl, int line = 0}) {
+    final cps = Uint32List(cols)..fillRange(0, cols, 32);
+    final fgs = Uint32List(cols)..fillRange(0, cols, _defaultFg);
+    final bgs = Uint32List(cols)..fillRange(0, cols, _defaultBg);
+    final fls = Uint16List(cols);
+    final u = text.runes.toList();
+    for (var c = 0; c < cols && c < u.length; c++) {
+      cps[c] = u[c];
+      if (fg != null) fgs[c] = fg(c);
+      if (bg != null) bgs[c] = bg(c);
+      if (fl != null) fls[c] = fl(c);
+    }
+    return LineCells(line: line, codepoints: cps, fg: fgs, bg: bgs, flags: fls);
+  }
+
+  lines.add(row('plain ascii text 0123', line: 0));
+  lines.add(row('red green blue yellow', line: 1, fg: (c) {
+    if (c < 4) return 0xCC0000;
+    if (c < 10) return 0x4E9A06;
+    if (c < 15) return 0x3465A4;
+    return 0xC4A000;
+  }));
+  lines.add(row('colored bg block here', line: 2, bg: (c) => c < 12 ? 0x2A9D8F : _defaultBg, fg: (c) => 0x101010));
+  lines.add(row('bold italic underline', line: 3, fl: (c) {
+    if (c < 4) return kFlagBold;
+    if (c < 11) return kFlagItalic;
+    return kFlagUnderline;
+  }));
+  lines.add(row('strike + selection sel', line: 4, fl: (c) {
+    if (c < 6) return kFlagStrikeout;
+    if (c >= 9) return kFlagSelected;
+    return 0;
+  }));
+  // CJK wide pair on row 5: '中文' each occupies a WIDE lead + WIDE_SPACER.
+  final cjk = row('', line: 5);
+  cjk.codepoints[0] = '中'.runes.first; cjk.flags[0] = kFlagWide; cjk.flags[1] = kFlagWideSpacer;
+  cjk.codepoints[2] = '文'.runes.first; cjk.flags[2] = kFlagWide; cjk.flags[3] = kFlagWideSpacer;
+  // Trailing ASCII after the wide pair to confirm grid alignment is preserved.
+  for (final e in 'CJK 中文 ok'.runes.toList().asMap().entries) {
+    if (e.key >= 4 && e.key < cols) cjk.codepoints[e.key + 2] = e.value;
+  }
+  lines.add(cjk);
+  for (var r = 6; r < rows; r++) {
+    lines.add(row('row $r filler ............', line: r));
+  }
+
+  grid.apply(GridUpdate(
+    full: true, rows: rows, columns: cols, lines: lines,
+    cursorRow: 0, cursorCol: 22, cursorVisible: true, cursorShape: 0,
+    defaultFg: _defaultFg, defaultBg: _defaultBg,
+  ));
+  return grid;
+}
+
+// Deliberately FRACTIONAL cell metrics (real sub-pixel monospace advance) so the
+// atlas's physical-slot rounding is exercised — integer metrics (e.g. 9×18 @ 2x)
+// hide the slot-drift bug this harness must catch.
+const int _cols = 28, _rows = 8;
+const double _cw = 8.43, _ch = 17.25;
+
+/// A full-screen grid densely filled with varied glyphs + scattered colors —
+/// the scale at which the atlas slot-drift bug was worst (it grows per col/row).
+MirrorGrid _denseScene(int cols, int rows) {
+  final grid = MirrorGrid(defaultFg: _defaultFg, defaultBg: _defaultBg);
+  final lines = <LineCells>[];
+  const palette = [0xD8D8D8, 0xCC0000, 0x4E9A06, 0x3465A4, 0xC4A000, 0x06989A];
+  for (var r = 0; r < rows; r++) {
+    final cps = Uint32List(cols);
+    final fgs = Uint32List(cols);
+    final bgs = Uint32List(cols)..fillRange(0, cols, _defaultBg);
+    final fls = Uint16List(cols);
+    for (var c = 0; c < cols; c++) {
+      cps[c] = 33 + ((r * 80 + c) % 94); // printable ASCII, varied per cell
+      fgs[c] = palette[(r + c) % palette.length];
+    }
+    lines.add(LineCells(line: r, codepoints: cps, fg: fgs, bg: bgs, flags: fls));
+  }
+  grid.apply(GridUpdate(
+    full: true, rows: rows, columns: cols, lines: lines,
+    cursorRow: 0, cursorCol: 0, cursorVisible: false,
+    defaultFg: _defaultFg, defaultBg: _defaultBg,
+  ));
+  return grid;
+}
+
+Future<ui.Image> _renderToImage(MirrorGrid grid, String outPath,
+    {double scale = 2.0, bool useAtlas = false, int cols = _cols, int rows = _rows}) async {
+  final glyphs = GlyphCache(
+    fontFamily: 'monospace', fontSize: 14, cellWidth: _cw,
+    boldFamily: 'monospace-bold', fontFamilyFallback: const ['cjk'],
+    lineHeight: _ch / 14, maxEntries: 1 << 20, maxBuildsPerFrame: 1 << 20,
+  );
+  final atlas = useAtlas
+      ? GlyphAtlas(
+          fontFamily: 'monospace', fontSize: 14, cellWidth: _cw, cellHeight: _ch,
+          devicePixelRatio: scale, boldFamily: 'monospace-bold',
+          fontFamilyFallback: const ['cjk'], lineHeight: _ch / 14)
+      : null;
+  final painter = TerminalPainter(
+    grid: grid, glyphs: glyphs, cellWidth: _cw, cellHeight: _ch,
+    selectionColor: 0x553A6EA5,
+    searchColors: const SearchColors(matchBg: 0xAC4242, matchFg: 0x181818, focusedBg: 0xF4BF75, focusedFg: 0x181818),
+    hintColors: const HintColors(bg: 0xF4BF75, fg: 0x181818),
+    atlas: atlas,
+  );
+  final cursor = CursorPainter(
+    grid: grid, glyphs: glyphs, cellWidth: _cw, cellHeight: _ch,
+    blinkOn: ValueNotifier(true),
+  );
+  final size = ui.Size(cols * _cw, rows * _ch);
+
+  // The atlas path needs one warmup paint: frame 1 requests glyphs (drawn via
+  // fallback), frame 2 (after rebuildIfNeeded) draws them from the atlas.
+  ui.Image render() {
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec);
+    canvas.scale(scale);
+    canvas.drawRect(ui.Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = const Color(0xFF181818));
+    painter.paint(canvas, size);
+    cursor.paint(canvas, size);
+    return rec.endRecording().toImageSync(
+        (size.width * scale).ceil(), (size.height * scale).ceil());
+  }
+
+  if (useAtlas) render().dispose(); // warmup frame
+  final img = render();
+  final png = await img.toByteData(format: ui.ImageByteFormat.png);
+  File(outPath).writeAsBytesSync(png!.buffer.asUint8List());
+  // ignore: avoid_print
+  print('wrote $outPath (${img.width}x${img.height})');
+  return img;
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    await _loadFont('monospace', _mono);
+    if (File(_monoBold).existsSync()) await _loadFont('monospace-bold', _monoBold);
+    if (File(_cjk).existsSync()) await _loadFont('cjk', _cjk);
+  });
+
+  // Fractional DPR (1.25) on top of fractional cell metrics — the exact
+  // combination that drifted before anchoring glyphs to integer slot origins.
+  test('atlas render matches the paragraph render (rich scene, 1.25x DPR)', () async {
+    final pImg = await _renderToImage(_scene(_cols, _rows), '/tmp/fa_render_paragraph.png',
+        scale: 1.25);
+    final aImg = await _renderToImage(_scene(_cols, _rows), '/tmp/fa_render_atlas.png',
+        scale: 1.25, useAtlas: true);
+    await _assertConverges(pImg, aImg, 'rich');
+  });
+
+  // Full-screen scale (80×24), fractional metrics + DPR: the slot-drift bug grew
+  // per column/row, so a garbled render would be obvious here. Guards that the
+  // integer-slot anchoring holds at the size of a real terminal screen.
+  test('atlas render matches at full-screen 80x24 (drift would compound here)', () async {
+    final pImg = await _renderToImage(_denseScene(80, 24), '/tmp/fa_dense_paragraph.png',
+        scale: 1.25, cols: 80, rows: 24);
+    final aImg = await _renderToImage(_denseScene(80, 24), '/tmp/fa_dense_atlas.png',
+        scale: 1.25, cols: 80, rows: 24, useAtlas: true);
+    await _assertConverges(pImg, aImg, 'dense-80x24');
+  });
+}
+
+/// Asserts the atlas image converges to the paragraph image under 4×4 block
+/// averaging. A correct atlas glyph differs only by sub-pixel placement (a ~1px
+/// shift flips sharp edge pixels fully, so raw per-pixel diff is a poor oracle);
+/// block-averaging preserves local ink density, so a correct render converges
+/// while a GARBLED one (glyphs sampled from the wrong slot — the bug this guards)
+/// keeps a large block difference.
+Future<void> _assertConverges(ui.Image pImg, ui.Image aImg, String label) async {
+  final w = pImg.width, h = aImg.height;
+  final p = (await pImg.toByteData(format: ui.ImageByteFormat.rawRgba))!.buffer.asUint8List();
+  final a = (await aImg.toByteData(format: ui.ImageByteFormat.rawRgba))!.buffer.asUint8List();
+
+  const b = 4;
+  double avg(Uint8List px, int bx, int by, int ch) {
+    var sum = 0, n = 0;
+    for (var dy = 0; dy < b; dy++) {
+      for (var dx = 0; dx < b; dx++) {
+        final x = bx * b + dx, y = by * b + dy;
+        if (x >= w || y >= h) continue;
+        sum += px[(y * w + x) * 4 + ch];
+        n++;
+      }
+    }
+    return n == 0 ? 0 : sum / n;
+  }
+
+  final bw = (w / b).ceil(), bh = (h / b).ceil();
+  var maxBlockDiff = 0.0, sumBlockDiff = 0.0;
+  for (var by = 0; by < bh; by++) {
+    for (var bx = 0; bx < bw; bx++) {
+      for (var ch = 0; ch < 3; ch++) {
+        final d = (avg(p, bx, by, ch) - avg(a, bx, by, ch)).abs();
+        maxBlockDiff = math.max(maxBlockDiff, d);
+        sumBlockDiff += d;
+      }
+    }
+  }
+  final meanBlockDiff = sumBlockDiff / (bw * bh * 3);
+  // ignore: avoid_print
+  print('DIFF[$label] atlas-vs-paragraph (4x4 block-avg): '
+      'maxBlockDiff=${maxBlockDiff.toStringAsFixed(1)}  '
+      'meanBlockDiff=${meanBlockDiff.toStringAsFixed(2)}');
+
+  // Correct render (sub-pixel shift only): ~3 mean / ~50 max. Garbled render
+  // (wrong-slot sampling): mean an order of magnitude up, max pegs near 255.
+  expect(meanBlockDiff, lessThan(8),
+      reason: '[$label] block-averaged images must converge (glyphs not garbled)');
+  expect(maxBlockDiff, lessThan(110),
+      reason: '[$label] no block may be grossly wrong (mis-sampled/mis-tinted glyph)');
+}

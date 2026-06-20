@@ -5,6 +5,7 @@ import 'package:flutter/scheduler.dart';
 import '../links/link_overlay.dart';
 import 'box_drawing.dart';
 import 'cell_flags.dart';
+import 'glyph_atlas.dart';
 import 'glyph_cache.dart';
 import 'mirror_grid.dart';
 
@@ -112,11 +113,19 @@ class TerminalPainter extends CustomPainter {
     required this.searchColors,
     required this.hintColors,
     this.linkOverlay = LinkOverlay.empty,
+    this.atlas,
   })  : _paintGeneration = grid.generation,
+        _atlasGeneration = atlas?.generation ?? 0,
         super(repaint: grid);
 
   final MirrorGrid grid;
   final GlyphCache glyphs;
+
+  /// When non-null, glyphs are batched through this atlas with a single
+  /// `drawRawAtlas` per frame instead of one `drawParagraph` per cell. Glyphs
+  /// not yet in the atlas fall back to [glyphs]/`drawParagraph` for one frame
+  /// while the atlas grows.
+  final GlyphAtlas? atlas;
   final double cellWidth;
   final double cellHeight;
   final int selectionColor;
@@ -124,12 +133,22 @@ class TerminalPainter extends CustomPainter {
   final HintColors hintColors;
   final LinkOverlay linkOverlay;
   final int _paintGeneration;
+  final int _atlasGeneration;
+
+  /// Paint for the glyph atlas batch. The masks carry their own AA coverage;
+  /// the 1/dpr downscale composites back ~1:1, so no filtering is needed.
+  static final Paint _atlasPaint = Paint()..filterQuality = FilterQuality.none;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rows = grid.rows, cols = grid.columns;
     if (rows == 0 || cols == 0) return;
     glyphs.beginFrame();
+    // Build any glyphs requested last frame, then start a fresh batch. The
+    // rebuild only does work when the glyph set grew, so steady state is free.
+    final atlas = this.atlas;
+    atlas?.rebuildIfNeeded();
+    atlas?.beginBatch((rows + 1) * cols);
 
     final shifted =
         _pushScrollShift(canvas, size, grid.scrollFraction, rows, cellHeight);
@@ -201,6 +220,10 @@ class TerminalPainter extends CustomPainter {
     // Pass 2: glyphs / geometry.
     final lineWidth = (cellHeight * 0.08).clamp(1.0, 4.0);
     final decoPaint = Paint()..strokeWidth = lineWidth;
+    // Underline/strikeout segments are deferred so they paint ON TOP of the
+    // atlas batch (emitted after this loop); otherwise the batched glyphs would
+    // cover a strikethrough. (a, b, packed-0x00RRGGBB).
+    final decoSegments = <(Offset, Offset, int)>[];
     var needsWarmupFrame = false;
     for (var row = firstRow; row < rows; row++) {
       final y = row * cellHeight;
@@ -218,17 +241,32 @@ class TerminalPainter extends CustomPainter {
           hintColors,
         );
         final fg = Color(0xFF000000 | ec.fg);
+        final bold = effFlags & kFlagBold != 0;
+        final italic = effFlags & kFlagItalic != 0;
+        final wide = effFlags & kFlagWide != 0;
         final cellRect = Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight);
         if (isBoxDrawing(cp) && paintBoxGlyph(canvas, cellRect, cp, fg, lineWidth)) {
-          // fall through for underline/strikeout decorations
+          // Box-drawing stays a direct vector draw (not atlased); fall through
+          // for underline/strikeout decorations.
+        } else if (atlas != null) {
+          // Atlas path: tint a white coverage mask via drawRawAtlas (one call
+          // for the whole frame, emitted after the loop). A glyph not yet in the
+          // atlas is requested (built next frame) and drawn via the paragraph
+          // fallback this frame so nothing is ever missing.
+          final key = GlyphAtlas.keyFor(cp, bold: bold, italic: italic, wide: wide);
+          if (atlas.request(key)) {
+            atlas.addSprite(key, col * cellWidth, y, 0xFF000000 | ec.fg);
+          } else {
+            needsWarmupFrame = true;
+            final paragraph =
+                glyphs.tryGet(cp, ec.fg, bold: bold, italic: italic, wide: wide);
+            if (paragraph != null) {
+              canvas.drawParagraph(paragraph, Offset(col * cellWidth, y));
+            }
+          }
         } else {
-          final paragraph = glyphs.tryGet(
-            cp,
-            ec.fg,
-            bold: effFlags & kFlagBold != 0,
-            italic: effFlags & kFlagItalic != 0,
-            wide: effFlags & kFlagWide != 0,
-          );
+          final paragraph =
+              glyphs.tryGet(cp, ec.fg, bold: bold, italic: italic, wide: wide);
           if (paragraph != null) {
             canvas.drawParagraph(paragraph, Offset(col * cellWidth, y));
           } else {
@@ -237,26 +275,28 @@ class TerminalPainter extends CustomPainter {
         }
         if (effFlags & (kFlagUnderline | kFlagStrikeout | kFlagHyperlink) != 0) {
           final x = col * cellWidth;
-          decoPaint.color = fg;
           final ys = decorationYs(y, cellHeight);
           if (effFlags & (kFlagUnderline | kFlagHyperlink) != 0) {
-            canvas.drawLine(
-              Offset(x, ys.underline),
-              Offset(x + cellWidth, ys.underline),
-              decoPaint,
-            );
+            decoSegments.add(
+                (Offset(x, ys.underline), Offset(x + cellWidth, ys.underline), ec.fg));
           }
           if (effFlags & kFlagStrikeout != 0) {
-            canvas.drawLine(
-              Offset(x, ys.strikeout),
-              Offset(x + cellWidth, ys.strikeout),
-              decoPaint,
-            );
+            decoSegments.add(
+                (Offset(x, ys.strikeout), Offset(x + cellWidth, ys.strikeout), ec.fg));
           }
         }
       }
     }
-    if (needsWarmupFrame) SchedulerBinding.instance.scheduleFrame();
+    // Emit the whole frame's glyphs in one drawRawAtlas, then the decorations
+    // on top.
+    atlas?.drawBatch(canvas, _atlasPaint);
+    for (final (a, b, color) in decoSegments) {
+      decoPaint.color = Color(0xFF000000 | color);
+      canvas.drawLine(a, b, decoPaint);
+    }
+    if (needsWarmupFrame || (atlas?.hasPending ?? false)) {
+      SchedulerBinding.instance.scheduleFrame();
+    }
 
     if (shifted) canvas.restore();
   }
@@ -265,6 +305,8 @@ class TerminalPainter extends CustomPainter {
   bool shouldRepaint(covariant TerminalPainter old) =>
       old.grid != grid ||
       old._paintGeneration != _paintGeneration ||
+      old._atlasGeneration != _atlasGeneration ||
+      old.atlas != atlas ||
       old.cellWidth != cellWidth ||
       old.cellHeight != cellHeight ||
       old.linkOverlay != linkOverlay;

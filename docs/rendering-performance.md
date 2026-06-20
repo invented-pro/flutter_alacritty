@@ -1,10 +1,9 @@
 # Rendering Performance — Findings & Optimization Plan
 
-Status: **P1/P2/P3/P5 implemented & test-verified** (2026-06-20); P4 outstanding.
-This document records *why* the current pipeline is slower than native Alacritty,
-with evidence from both this repo and the upstream Alacritty renderer, and lays
-out a phased, low-risk optimization plan. Each item ends with a way to
-**measure** whether it actually helped — we commit numbers, not assertions.
+Status: **P1–P5 all implemented & verified** (2026-06-20). This document records
+*why* the original pipeline was slower than native Alacritty, with evidence from
+both this repo and the upstream Alacritty renderer, and the phased optimization
+that closed the gap. Each item is backed by a measurement, not an assertion.
 
 ## Implemented (2026-06-20)
 
@@ -14,15 +13,28 @@ out a phased, low-risk optimization plan. Each item ends with a way to
 | **P2** | Background pass skips default-bg cells (native `bg_alpha==0`) and run-length merges adjacent same-color spans into one `drawRect`. | `terminal_painter_test.dart`, `mirror_grid_test.dart`, lifecycle suite green |
 | **P5** | `selPaint` / `decoPaint` hoisted out of the per-cell loops. | folded into P2 |
 | **P3** | FFI `LineUpdate` is now columnar (`Vec<u32>`/`Vec<u16>`) instead of `Vec<CellData>`; FRB decodes straight to `Uint32List`/`Uint16List`; `engine_binding._lineCells` is a zero-copy passthrough; `MirrorGrid`/`LineCells` store `Uint32List`. No per-cell Dart object per update. | 89 Rust tests (`cargo test`); real-FFI `engine_bindings_test.dart`; full Dart suite green |
+| **P4** | Grid glyphs go through a GPU glyph atlas (`GlyphAtlas`): each glyph is rasterized once as a white coverage mask; the painter submits a whole frame with one `Canvas.drawRawAtlas` (per-cell fg applied via the `colors` array + `BlendMode.modulate`) instead of `drawParagraph` per cell. DPR-aware (masks at physical res, `1/dpr` RSTransform). Box-drawing stays a direct vector draw; a not-yet-atlased glyph falls back to `drawParagraph` for one frame while the atlas grows. Cursor layer keeps `GlyphCache`. | headless pixel-diff vs the `drawParagraph` render is identical bar ~1px AA (`test/visual_render_test.dart`, real DejaVu/CJK fonts); benchmark dense-text **1920 `drawParagraph` → 1 `drawRawAtlas`**, UI paint 428→170µs; verified crisp + correctly tinted in the running app |
 
-Files touched: `lib/render/terminal_painter.dart`, `lib/render/mirror_grid.dart`,
-`lib/ui/terminal_view.dart`, `lib/engine/engine_binding.dart`,
+Benchmark (`test/rendering_benchmark_test.dart`, 80×24, UI-thread paint µs +
+draw-call counts):
+
+| Scenario | drawRect | drawParagraph | drawRawAtlas | paint |
+|----------|----------|---------------|--------------|-------|
+| idle prompt | 0 (was 1920) | 20 | — | 105µs |
+| dense text | 0 | 1920 | — | 429µs |
+| dense text +atlas | 0 | **0** | **1** (1920 sprites) | **170µs** |
+| worst-case | 1920 | 1920 | — | 898µs |
+| worst-case +atlas | 1920 | **0** | **1** | **578µs** |
+
+Files touched: `lib/render/terminal_painter.dart`, `lib/render/glyph_atlas.dart`
+(new), `lib/render/mirror_grid.dart`, `lib/ui/terminal_view.dart`,
+`lib/engine/engine_binding.dart`,
 `packages/rust_lib_flutter_alacritty/rust/src/engine.rs` (+ regenerated
 `lib/src/rust/*`, `src/frb_generated.rs`). The cdylib must be rebuilt
 (`cargo build` / next `flutter build`) — a stale bundled `.so` decodes the new
 columnar wire format wrong (RangeError in `sse_decode_list_prim_u_32_strict`).
 
-Original analysis (now historical for P1/P2/P3/P5; P4 still applies) follows.
+Original analysis (now historical) follows.
 
 ## TL;DR
 
