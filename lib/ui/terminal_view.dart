@@ -981,6 +981,7 @@ class TerminalViewState extends State<TerminalView>
                           ),
                           linkOverlay: _linkOverlay,
                           atlas: _atlas,
+                          backgroundOpacity: widget.backgroundOpacity,
                         ),
                       ),
                     ),

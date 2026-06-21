@@ -34,6 +34,17 @@ Files touched: `lib/render/terminal_painter.dart`, `lib/render/glyph_atlas.dart`
 (`cargo build` / next `flutter build`) — a stale bundled `.so` decodes the new
 columnar wire format wrong (RangeError in `sse_decode_list_prim_u_32_strict`).
 
+**Release checklist** (the columnar FFI is the risky bit): (1) `cargo build` the
+engine and bump the `rust_lib_flutter_alacritty` submodule pointer; (2) run the
+real-FFI `test/engine_bindings_test.dart` (it self-builds the cdylib) — add it to
+CI, since the default suite uses fakes and won't catch a wire-format drift;
+(3) spot-check rendering on a fractional-DPR / fractional-cell-metric display
+(the `visual`-tagged suite, gated on host fonts, covers this headlessly).
+
+**Self-sufficiency:** the grid painter clears its layer to `defaultBg` at
+`backgroundOpacity` (default 1.0 = opaque), so the widget does not depend on a
+host-provided background even though P2 skips per-cell default-bg fills.
+
 Original analysis (now historical) follows.
 
 ## TL;DR

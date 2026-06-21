@@ -54,6 +54,12 @@ class HintColors {
   const HintColors({required this.bg, required this.fg});
   final int bg;
   final int fg;
+
+  @override
+  bool operator ==(Object other) =>
+      other is HintColors && other.bg == bg && other.fg == fg;
+  @override
+  int get hashCode => Object.hash(bg, fg);
 }
 
 /// Effective fg/bg with full precedence: focused-match > match > hyperlink > base.
@@ -82,6 +88,16 @@ class SearchColors {
   final int matchFg;
   final int focusedBg;
   final int focusedFg;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SearchColors &&
+      other.matchBg == matchBg &&
+      other.matchFg == matchFg &&
+      other.focusedBg == focusedBg &&
+      other.focusedFg == focusedFg;
+  @override
+  int get hashCode => Object.hash(matchBg, matchFg, focusedBg, focusedFg);
 }
 
 /// Applies the sub-cell scroll transform shared by the grid and cursor layers.
@@ -114,6 +130,7 @@ class TerminalPainter extends CustomPainter {
     required this.hintColors,
     this.linkOverlay = LinkOverlay.empty,
     this.atlas,
+    this.backgroundOpacity = 1.0,
   })  : _paintGeneration = grid.generation,
         _atlasGeneration = atlas?.generation ?? 0,
         super(repaint: grid);
@@ -132,6 +149,12 @@ class TerminalPainter extends CustomPainter {
   final SearchColors searchColors;
   final HintColors hintColors;
   final LinkOverlay linkOverlay;
+
+  /// Opacity [0,1] of the terminal's default background. 1.0 (default) makes the
+  /// grid layer fully opaque, so the widget is self-contained — it does NOT rely
+  /// on a host-provided background behind it. < 1.0 lets whatever is behind the
+  /// widget show through the default-bg regions (a translucent terminal).
+  final double backgroundOpacity;
   final int _paintGeneration;
   final int _atlasGeneration;
 
@@ -149,6 +172,21 @@ class TerminalPainter extends CustomPainter {
     final atlas = this.atlas;
     atlas?.rebuildIfNeeded();
     atlas?.beginBatch((rows + 1) * cols);
+
+    // Clear the whole layer to the default background first (like alacritty
+    // clearing the framebuffer to its bg color), so the per-cell pass can SKIP
+    // default-bg cells (P2) without depending on a host-provided background.
+    // `backgroundOpacity < 1` leaves the default-bg regions translucent so the
+    // host can show content behind a translucent terminal.
+    final bgAlpha = (backgroundOpacity.clamp(0.0, 1.0) * 255).round();
+    if (bgAlpha > 0) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()
+          ..isAntiAlias = false
+          ..color = Color((bgAlpha << 24) | grid.defaultBg),
+      );
+    }
 
     final shifted =
         _pushScrollShift(canvas, size, grid.scrollFraction, rows, cellHeight);
@@ -315,7 +353,12 @@ class TerminalPainter extends CustomPainter {
       old.atlas != atlas ||
       old.cellWidth != cellWidth ||
       old.cellHeight != cellHeight ||
-      old.linkOverlay != linkOverlay;
+      old.linkOverlay != linkOverlay ||
+      // Theme hot-swap: colors/opacity can change without a grid mutation.
+      old.selectionColor != selectionColor ||
+      old.backgroundOpacity != backgroundOpacity ||
+      old.searchColors != searchColors ||
+      old.hintColors != hintColors;
 }
 
 /// Paints only the cursor cell, on a layer above [TerminalPainter]. Repaints on

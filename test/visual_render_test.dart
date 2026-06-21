@@ -162,8 +162,8 @@ Future<ui.Image> _renderToImage(MirrorGrid grid, String outPath,
     final rec = ui.PictureRecorder();
     final canvas = Canvas(rec);
     canvas.scale(scale);
-    canvas.drawRect(ui.Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint()..color = const Color(0xFF181818));
+    // NO manual background fill — the painter must clear to its own defaultBg
+    // (self-sufficient; does not depend on a host-provided background).
     painter.paint(canvas, size);
     cursor.paint(canvas, size);
     return rec.endRecording().toImageSync(
@@ -207,6 +207,23 @@ void main() {
     final aImg = await _renderToImage(_denseScene(80, 24), '/tmp/fa_dense_atlas.png',
         scale: 1.25, cols: 80, rows: 24, useAtlas: true);
     await _assertConverges(pImg, aImg, 'dense-80x24');
+  });
+
+  // The painter must be self-sufficient: a default-bg cell with no glyph must
+  // render as OPAQUE defaultBg (alpha 255), not transparent — i.e. the widget
+  // does not depend on a host-provided background behind it.
+  test('default-bg region is opaque (no host-background dependency)', () async {
+    // All-blank grid (every cell default bg, codepoint 32).
+    final grid = MirrorGrid(defaultFg: _defaultFg, defaultBg: _defaultBg);
+    grid.initializeEmpty(4, 8);
+    final img = await _renderToImage(grid, '/tmp/fa_bg.png', useAtlas: true, cols: 8, rows: 4);
+    final data = (await img.toByteData(format: ui.ImageByteFormat.rawRgba))!.buffer.asUint8List();
+    // Sample the center pixel.
+    final px = ((img.height ~/ 2) * img.width + img.width ~/ 2) * 4;
+    expect(data[px + 3], 255, reason: 'default-bg must be fully opaque');
+    expect(data[px], (_defaultBg >> 16) & 0xFF, reason: 'red channel = defaultBg');
+    expect(data[px + 1], (_defaultBg >> 8) & 0xFF, reason: 'green channel = defaultBg');
+    expect(data[px + 2], _defaultBg & 0xFF, reason: 'blue channel = defaultBg');
   });
 }
 
