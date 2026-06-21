@@ -105,6 +105,14 @@ class TerminalEngine {
   EngineBinding? _binding;
   bool _disposed = false;
 
+  // Last size handed to [resize]. A full reflow + snapshot is expensive
+  // (alacritty re-wraps the whole grid + scrollback, synchronously on the UI
+  // thread), and each layout change drives [resize] twice with identical dims
+  // (TerminalView and the host both call it). Skipping the no-op repeat halves
+  // the cost of a panel/divider/window resize. -1 forces the first call through.
+  int _lastColumns = -1;
+  int _lastRows = -1;
+
   // Pre-bind buffers. The native grid is created lazily, but only `resize`
   // (and the `fromBinding` test path) carry authoritative dimensions — a grid
   // must never be born at a size nobody asked for. Calls that arrive before the
@@ -178,6 +186,11 @@ class TerminalEngine {
   /// native binding on first call and then replays anything that arrived early.
   void resize({required int columns, required int rows}) {
     _bindWithSize(columns: columns, rows: rows);
+    // Coalesce no-op repeats (same dims) — a resize to the current size still
+    // triggers a full FFI reflow + snapshot otherwise.
+    if (columns == _lastColumns && rows == _lastRows) return;
+    _lastColumns = columns;
+    _lastRows = rows;
     _client!.resize(columns, rows);
   }
 

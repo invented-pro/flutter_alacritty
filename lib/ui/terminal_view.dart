@@ -228,6 +228,18 @@ class TerminalViewState extends State<TerminalView>
 
   final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
   Timer? _blinkTimer;
+
+  // Throttles layout-driven grid resizes. A `term.resize` is a full, synchronous
+  // reflow of the grid + scrollback; doing it on every frame of a continuous
+  // size change (divider drag) stutters. So we THROTTLE (not debounce): the
+  // first change applies immediately — so a one-shot toggle / window resize is
+  // never left lagging behind its pane (which showed as "width sometimes
+  // smaller") — and further changes inside the window coalesce into one trailing
+  // apply. Debouncing instead delayed even one-shots, leaving the grid stale.
+  Timer? _resizeThrottle;
+  int _pendingResizeCols = 0;
+  int _pendingResizeRows = 0;
+  static const _resizeWindow = Duration(milliseconds: 90);
   // Wall-clock of the last terminal input; drives `cursorBlinkTimeout` (blink
   // pauses after inactivity, resumes solid-then-blinking on the next input).
   DateTime _lastInputAt = DateTime.now();
@@ -461,6 +473,7 @@ class TerminalViewState extends State<TerminalView>
   @override
   void dispose() {
     _stopFling();
+    _resizeThrottle?.cancel();
     _blinkTimer?.cancel();
     _blinkOn.dispose();
     _bellSub?.cancel();
@@ -874,11 +887,29 @@ class TerminalViewState extends State<TerminalView>
 
   void _syncViewportToHost(int cols, int rows) {
     if (cols <= 0 || rows <= 0) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _engine.resize(columns: cols, rows: rows);
-      widget.onViewportResize?.call(cols, rows);
+    _pendingResizeCols = cols;
+    _pendingResizeRows = rows;
+    // Throttle window already open: just record the latest size; the trailing
+    // flush will apply it. (Avoids per-frame reflow during a drag.)
+    if (_resizeThrottle != null) return;
+    // Leading edge: apply the first change immediately. Runs during
+    // build/layout, so defer the actual resize to the post-frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applyViewportResize());
+    _resizeThrottle = Timer(_resizeWindow, () {
+      _resizeThrottle = null;
+      // Trailing flush: apply the latest size seen during the window. A no-op
+      // (same size) is coalesced away by the engine's same-size guard.
+      _applyViewportResize();
     });
+  }
+
+  void _applyViewportResize() {
+    if (!mounted) return;
+    final cols = _pendingResizeCols;
+    final rows = _pendingResizeRows;
+    if (cols <= 0 || rows <= 0) return;
+    _engine.resize(columns: cols, rows: rows);
+    widget.onViewportResize?.call(cols, rows);
   }
 
   void _ensureSizing(int cols, int rows) {

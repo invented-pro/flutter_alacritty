@@ -357,7 +357,10 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(cellH(), greaterThan(h0));
-    await tester.pump(); // post-frame engine.resize after zoom
+    // The grid reflow coalesces on a settle timer (debounced so a drag/zoom
+    // burst reflows once), so wait out the window before asserting.
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(); // run the post-frame engine.resize
     expect(binding.lastResizeRows, lessThan(rowsBeforeZoom));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.digit0);
