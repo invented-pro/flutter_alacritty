@@ -29,6 +29,8 @@ import '../links/terminal_link_provider.dart';
 import '../links/url_link_provider.dart';
 import '../render/cell_flags.dart';
 import '../render/cell_metrics.dart';
+import 'terminal_resize_controller.dart';
+import 'viewport_geometry.dart';
 import '../render/glyph_atlas.dart';
 import '../render/glyph_cache.dart';
 import '../render/mirror_grid.dart';
@@ -118,6 +120,7 @@ class TerminalView extends StatefulWidget {
     this.primaryTapActivatesLink = false,
     this.onBell,
     this.onViewportResize,
+    this.resizeController,
     List<TerminalLinkProvider>? linkProviders,
   })  : linkProviders = linkProviders ?? _defaultLinkProviders,
         textStyle = textStyle ?? TerminalStyle.defaults();
@@ -196,7 +199,17 @@ class TerminalView extends StatefulWidget {
 
   /// Fired after [engine] is resized to match the view's cell grid (font zoom
   /// or layout). Hosts should resize the PTY to the same `(columns, rows)`.
+  ///
+  /// **Deprecated.** Use [resizeController] instead — it provides stability
+  /// gating, transaction support, and eliminates the one-frame resize flash.
+  /// When [resizeController] is provided, this callback is NOT called.
   final void Function(int columns, int rows)? onViewportResize;
+
+  /// Optional per-view resize controller. When provided, the view delegates
+  /// all grid measurement and PTY timing to this controller instead of using
+  /// the legacy throttle+postFrame path. If omitted, the legacy behavior
+  /// ([onViewportResize]) is used for backward compatibility.
+  final TerminalResizeController? resizeController;
 
   /// Host-injectable link sources. Defaults to a single URL provider so plain
   /// consumers keep clickable URLs for free. Pass `const []` to disable.
@@ -378,7 +391,11 @@ class TerminalViewState extends State<TerminalView>
       // TeamPilot-style hosts swap engines per member while the view keeps the
       // same layout cols/rows. _ensureSizing would skip onViewportResize, leaving
       // a PTY started in the background at 80×24 while the painter is full-screen.
-      _syncViewportToHost(_cols, _rows);
+      if (widget.resizeController != null) {
+        widget.resizeController!.commitNow();
+      } else {
+        _syncViewportToHost(_cols, _rows);
+      }
     }
     // Re-attach controller / focus if the caller swapped them out. Rare; the
     // host typically creates both once.
@@ -421,6 +438,7 @@ class TerminalViewState extends State<TerminalView>
         _glyphs = _newGlyphCache();
         _disposeAtlas(); // rebuilt lazily in build() with the new metrics
       });
+      _commitAfterMetricsChange();
     }
     if (!identical(widget.linkProviders, oldWidget.linkProviders)) {
       for (final p in oldWidget.linkProviders) {
@@ -578,6 +596,19 @@ class TerminalViewState extends State<TerminalView>
       widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
       _glyphs = _newGlyphCache();
       _disposeAtlas(); // rebuilt lazily in build() with the new metrics
+    });
+    _commitAfterMetricsChange();
+  }
+
+  /// After a cell-metrics change (font zoom / textStyle swap) the new grid is
+  /// computed by the next `build()`'s `propose()`. Force the controller to
+  /// commit it immediately afterwards so the engine + PTY adopt the new grid
+  /// without waiting for the stability gate or settle timer.
+  void _commitAfterMetricsChange() {
+    final ctrl = widget.resizeController;
+    if (ctrl == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ctrl.commitNow();
     });
   }
 
@@ -749,12 +780,18 @@ class TerminalViewState extends State<TerminalView>
   }
 
   (int, int, bool) _cellAt(Offset local) {
-    final col = (local.dx / _metrics.width).floor().clamp(0, _cols - 1);
+    // Clamp to the COMMITTED grid (`_grid`, the engine's actual size), not the
+    // proposed `_cols/_rows`. Under lock-step the proposed grid can lead the
+    // engine during a drag; clamping to it would let selection/hit-tests address
+    // columns the engine hasn't allocated yet (ghost cells).
+    final maxCol = _grid.columns > 0 ? _grid.columns - 1 : 0;
+    final maxRow = _grid.rows > 0 ? _grid.rows - 1 : 0;
+    final col = (local.dx / _metrics.width).floor().clamp(0, maxCol);
     // The painter shifts content down by `scrollFraction * cellHeight` for
     // sub-cell scroll; undo it here so hit-testing (selection, hover) lands on
     // the row the user actually sees rather than the unscrolled grid row.
     final yRows = local.dy / _metrics.height - _grid.scrollFraction;
-    final row = yRows.floor().clamp(0, _rows - 1);
+    final row = yRows.floor().clamp(0, maxRow);
     final rightHalf = (local.dx / _metrics.width) - col > 0.5;
     return (row, col, rightHalf);
   }
@@ -775,8 +812,12 @@ class TerminalViewState extends State<TerminalView>
   void _refreshSelection() => _engine.refreshView();
 
   void _reportMouse(Offset local, int button, MouseAction action) {
-    final col = (local.dx / _metrics.width).floor().clamp(0, _cols - 1) + 1;
-    final row = (local.dy / _metrics.height).floor().clamp(0, _rows - 1) + 1;
+    // Report against the committed engine grid (see [_cellAt]) so a drag that
+    // outpaces the PTY never sends out-of-range mouse coordinates to the program.
+    final maxCol = _grid.columns > 0 ? _grid.columns - 1 : 0;
+    final maxRow = _grid.rows > 0 ? _grid.rows - 1 : 0;
+    final col = (local.dx / _metrics.width).floor().clamp(0, maxCol) + 1;
+    final row = (local.dy / _metrics.height).floor().clamp(0, maxRow) + 1;
     final hw = HardwareKeyboard.instance;
     final bytes = encodeMouse(button, action, col, row,
         shift: hw.isShiftPressed,
@@ -935,13 +976,24 @@ class TerminalViewState extends State<TerminalView>
             (constraints.maxWidth - pad.horizontal).clamp(0.0, double.infinity);
         final availH =
             (constraints.maxHeight - pad.vertical).clamp(0.0, double.infinity);
-        // Never size below the VT minimum: a 1-column grid panics the engine
-        // when a fullwidth glyph arrives (see [kMinTerminalColumns]). During a
-        // near-zero-width layout frame (tab-open animation, collapsed pane) the
-        // floored count would otherwise be 1.
-        final cols = (availW / _metrics.width).floor().clamp(kMinTerminalColumns, 1000);
-        final rows = (availH / _metrics.height).floor().clamp(kMinTerminalRows, 1000);
-        _ensureSizing(cols, rows);
+
+        if (widget.resizeController != null) {
+          // New path: delegate to TerminalResizeController — lock-step commit
+          // (engine + PTY resize together at stability), gated by the policy.
+          // Hit-testing reads the committed engine grid (`_grid`) directly, so
+          // `_cols/_rows` are NOT mirrored here — they belong to the legacy path.
+          final query = ViewportQuery(
+            available: Size(availW, availH),
+            cell: _metrics,
+          );
+          widget.resizeController!.propose(query);
+        } else {
+          // Legacy path: floor + clamp + 90ms throttle + postFrame deferral.
+          // Remove when all callers have migrated to TerminalResizeController.
+          final cols = (availW / _metrics.width).floor().clamp(kMinTerminalColumns, 1000);
+          final rows = (availH / _metrics.height).floor().clamp(kMinTerminalRows, 1000);
+          _ensureSizing(cols, rows);
+        }
         _ensureAtlas(MediaQuery.devicePixelRatioOf(context));
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _reportCaretRectToIme());
