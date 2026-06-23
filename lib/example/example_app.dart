@@ -117,7 +117,6 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   StreamSubscription<Uint8List>? _engineOutputSub;
   StreamSubscription<String>? _clipSub;
   StreamSubscription<void>? _clipLoadSub;
-  int _cols = 0, _rows = 0;
   TermStatus _status = TermStatus.running;
   int? _exitCode;
   String? _errorMessage;
@@ -134,6 +133,9 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   void initState() {
     super.initState();
     _cfgSub = widget.configUpdates?.listen(_applyConfig);
+    if (_status != TermStatus.error) {
+      _ensureEngine();
+    }
   }
 
   void _applyConfig(TerminalConfig next) {
@@ -159,40 +161,16 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
     if (e != null) _title.value = e.title.value;
   }
 
-  void _ensureStarted(int cols, int rows) {
-    if (_engine != null) {
-      // Viewport resize (incl. Ctrl+=/-/0 zoom) is driven by [TerminalView]
-      // via [onViewportResize] so cols/rows match zoomed cell metrics.
-      return;
-    }
-    _cols = cols;
-    _rows = rows;
-    if (_status != TermStatus.error) {
-      _start(cols, rows);
-    }
-  }
-
-  void _onViewportResize(int cols, int rows) {
-    if (_status != TermStatus.running) return;
-    _cols = cols;
-    _rows = rows;
-    _pty?.resize(rows, cols);
-  }
-
-  void _start(int cols, int rows) {
+  /// Creates [TerminalEngine] once. PTY spawn is deferred to the first
+  /// [TerminalView] layout commit via [_onPtyResize].
+  void _ensureEngine() {
+    if (_engine != null) return;
     if (_config.window.opacity != 1.0 ||
         _config.window.decorations != 'full') {
       debugPrint('flutter_alacritty: window.opacity/decorations are host-applied; '
           'see linux/runner for native window setup (config-only here)');
     }
     try {
-      final pty = (widget.ptyFactory ??
-          ({required int rows, required int columns}) =>
-              FlutterPtyBackend(rows: rows, columns: columns, shell: _config.shell))(
-        rows: rows,
-        columns: cols,
-      );
-      _pty = pty;
       final engine = TerminalEngine(
         config: _config,
         engineFactory: widget.engineFactory,
@@ -206,14 +184,6 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
         final data = await Clipboard.getData('text/plain');
         _engine?.respondClipboardLoad(data?.text ?? '');
       });
-      _engineOutputSub = engine.output.listen(pty.write);
-      engine.resize(columns: cols, rows: rows);
-      engine.initializeEmpty(rows, cols);
-      _outputSub = pty.output.listen(
-        engine.feed,
-        onDone: () => _exitIfCurrent(pty, null),
-      );
-      pty.exitCode.then((code) => _exitIfCurrent(pty, code));
       _status = TermStatus.running;
       _exitCode = null;
       _errorMessage = null;
@@ -224,16 +194,38 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
     if (mounted) setState(() {});
   }
 
-  void _exitIfCurrent(PtyBackend p, int? code) {
-    if (!identical(_pty, p)) return;
+  void _onPtyResize(int cols, int rows) {
     if (_status != TermStatus.running) return;
-    setState(() {
-      _status = TermStatus.exited;
-      _exitCode = code;
-    });
+    if (_pty == null) {
+      _startSession(cols, rows);
+      return;
+    }
+    _pty!.resize(rows, cols);
   }
 
-  void _restart() {
+  void _startSession(int cols, int rows) {
+    try {
+      final pty = (widget.ptyFactory ??
+          ({required int rows, required int columns}) =>
+              FlutterPtyBackend(rows: rows, columns: columns, shell: _config.shell))(
+        rows: rows,
+        columns: cols,
+      );
+      _pty = pty;
+      _engineOutputSub = _engine!.output.listen(pty.write);
+      _outputSub = pty.output.listen(
+        _engine!.feed,
+        onDone: () => _exitIfCurrent(pty, null),
+      );
+      pty.exitCode.then((code) => _exitIfCurrent(pty, code));
+    } catch (e) {
+      _status = TermStatus.error;
+      _errorMessage = '$e';
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _tearDownSession() {
     _outputSub?.cancel();
     _engineOutputSub?.cancel();
     _clipSub?.cancel();
@@ -251,7 +243,25 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
     _engine = null;
     _exitCode = null;
     _errorMessage = null;
-    _start(_cols, _rows);
+  }
+
+  void _exitIfCurrent(PtyBackend p, int? code) {
+    if (!identical(_pty, p)) return;
+    if (_status != TermStatus.running) return;
+    setState(() {
+      _status = TermStatus.exited;
+      _exitCode = code;
+    });
+  }
+
+  void _restart() {
+    _tearDownSession();
+    setState(() {
+      _status = TermStatus.running;
+      _exitCode = null;
+      _errorMessage = null;
+    });
+    _ensureEngine();
   }
 
   void _searchChanged(String pattern) {
@@ -394,20 +404,8 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
   Widget _buildShell() {
     return Scaffold(
       backgroundColor: Color(0xFF000000 | _config.colors.background),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final padX = _config.window.padding.x;
-          final padY = _config.window.padding.y;
-          final availW =
-              (constraints.maxWidth - 2 * padX).clamp(0.0, double.infinity);
-          final availH =
-              (constraints.maxHeight - 2 * padY).clamp(0.0, double.infinity);
-          final cols = (availW / _metrics.width).floor().clamp(1, 1000);
-          final rows = (availH / _metrics.height).floor().clamp(1, 1000);
-          WidgetsBinding.instance
-              .addPostFrameCallback((_) => _ensureStarted(cols, rows));
-          return DropTarget(
-            onDragDone: _onDrop,
+      body: DropTarget(
+        onDragDone: _onDrop,
             // Screen-level Shortcuts+Actions ensures Ctrl+Shift+F toggles the
             // search bar even when the bar's TextField has focus (the search
             // bar is a sibling of TerminalView under the Stack, so the View's
@@ -438,7 +436,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
                             TerminalView(
                               _engine!,
                               key: _viewKey,
-                              onViewportResize: _onViewportResize,
+                              onPtyResize: _onPtyResize,
                               controller: _controller,
                               theme: _config.theme,
                               textStyle: _config.style,
@@ -509,19 +507,20 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
                       ),
                     ),
                     if (_engine != null)
-                      TerminalHistoryScrollbar(
-                        engine: _engine!,
-                        controller: _controller,
-                        historyLines: _config.scrolling.history,
-                        viewportRows: rows,
-                        cellHeight: _metrics.height,
+                      ListenableBuilder(
+                        listenable: _engine!.grid,
+                        builder: (context, _) => TerminalHistoryScrollbar(
+                          engine: _engine!,
+                          controller: _controller,
+                          historyLines: _config.scrolling.history,
+                          viewportRows: _engine!.grid.rows,
+                          cellHeight: _metrics.height,
+                        ),
                       ),
                   ],
                 ),
               ),
             ),
-          );
-        },
       ),
     );
   }

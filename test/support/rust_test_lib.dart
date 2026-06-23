@@ -13,6 +13,10 @@ String rustLibFileName() {
 }
 
 /// Locations a built Rust cdylib may live, fastest/most-likely first.
+///
+/// `cargo build` outputs are preferred over Flutter `build/*/bundle` copies so
+/// `flutter_rust_bridge_codegen generate && cargo build` keeps integration tests
+/// in sync without requiring a full `flutter build`.
 const rustDir = 'packages/rust_lib_flutter_alacritty/rust';
 
 List<String> rustLibCandidates() {
@@ -22,26 +26,26 @@ List<String> rustLibCandidates() {
 
   if (Platform.isLinux) {
     return [
-      'build/linux/x64/release/bundle/lib/$name',
-      'build/linux/x64/debug/bundle/lib/$name',
       cargoRelease,
       cargoDebug,
+      'build/linux/x64/release/bundle/lib/$name',
+      'build/linux/x64/debug/bundle/lib/$name',
     ];
   }
   if (Platform.isMacOS) {
     return [
-      'build/macos/Build/Products/Release/$name',
-      'build/macos/Build/Products/Debug/$name',
       cargoRelease,
       cargoDebug,
+      'build/macos/Build/Products/Release/$name',
+      'build/macos/Build/Products/Debug/$name',
     ];
   }
   if (Platform.isWindows) {
     return [
-      'build/windows/x64/runner/Release/$name',
-      'build/windows/x64/runner/Debug/$name',
       cargoRelease,
       cargoDebug,
+      'build/windows/x64/runner/Release/$name',
+      'build/windows/x64/runner/Debug/$name',
     ];
   }
   return [cargoRelease, cargoDebug];

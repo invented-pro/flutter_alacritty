@@ -232,4 +232,20 @@ void main() {
 
     engine.dispose();
   });
+
+  test('onPtyResize forwards to client after resize flush', () {
+    final binding = FakeBinding();
+    final engine = TerminalEngine.fromBinding(
+      binding,
+      config: TerminalConfig.defaults(),
+      schedule: (cb) => cb(),
+    );
+    var ptyCalls = 0;
+    engine.onPtyResize = (_, __) => ptyCalls++;
+
+    engine.resize(columns: 80, rows: 24);
+
+    expect(binding.resizeCalls, greaterThan(0));
+    expect(ptyCalls, 1);
+  });
 }

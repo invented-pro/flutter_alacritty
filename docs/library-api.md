@@ -13,6 +13,9 @@ is considered the public surface; anything else is internal.
 ## Quick start
 
 ```dart
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_alacritty/flutter_alacritty.dart';
 import 'package:flutter_alacritty/src/rust/frb_generated.dart';
@@ -33,16 +36,26 @@ class _TerminalScaffoldState extends State<TerminalScaffold> {
   final _config = TerminalConfig.defaults();
   late final _engine = TerminalEngine(config: _config);
   late final _controller = TerminalController()..attach(_engine);
-  late final PtyBackend _pty = FlutterPtyBackend(rows: 24, columns: 80);
+  PtyBackend? _pty;
 
-  late final StreamSubscription _ptyIn = _pty.output.listen(_engine.feed);
-  late final StreamSubscription _ptyOut = _engine.output.listen(_pty.write);
+  StreamSubscription<Uint8List>? _ptyIn;
+  StreamSubscription<Uint8List>? _ptyOut;
+
+  void _onPtyResize(int cols, int rows) {
+    if (_pty == null) {
+      _pty = FlutterPtyBackend(rows: rows, columns: cols);
+      _ptyIn = _pty!.output.listen(_engine.feed);
+      _ptyOut = _engine.output.listen(_pty!.write);
+    } else {
+      _pty!.resize(rows, cols);
+    }
+  }
 
   @override
   void dispose() {
-    _ptyIn.cancel();
-    _ptyOut.cancel();
-    _pty.kill();
+    _ptyIn?.cancel();
+    _ptyOut?.cancel();
+    _pty?.kill();
     _controller.dispose();
     _engine.dispose();
     super.dispose();
@@ -54,7 +67,11 @@ class _TerminalScaffoldState extends State<TerminalScaffold> {
       valueListenable: _engine.title,
       builder: (_, title, __) => Scaffold(
         appBar: AppBar(title: Text(title)),
-        body: TerminalView(_engine, controller: _controller),
+        body: TerminalView(
+          _engine,
+          controller: _controller,
+          onPtyResize: _onPtyResize,
+        ),
       ),
     );
   }
@@ -62,8 +79,10 @@ class _TerminalScaffoldState extends State<TerminalScaffold> {
 ```
 
 That is the minimum-viable consumer: ~50 lines including imports and lifecycle.
-`TerminalView` measures its own cell size and calls `engine.resize` from its
-`LayoutBuilder`; the host doesn't need to compute columns/rows.
+`TerminalView` measures its own cell size, commits engine resize via an internal
+`TerminalResizeController`, then fires `onPtyResize` so the host can SIGWINCH
+the PTY **after** the engine grid matches — the host does not compute
+columns/rows or call `engine.resize` separately.
 
 ## TerminalEngine API
 
@@ -75,7 +94,8 @@ first `feed` or `resize` call, so cheap to hold in tests or before layout.
 | --- | --- | --- |
 | `TerminalEngine({config, engineFactory?})` | ctor | Build a handle; native engine deferred until first IO. |
 | `feed(Uint8List bytes)` | `void` | PTY -> engine. Hot path; called from `pty.output.listen`. |
-| `resize({columns, rows})` | `void` | Cell-grid resize. Forward your PTY resize separately. |
+| `resize({columns, rows})` | `void` | Cell-grid resize. Does **not** resize the PTY — use `onPtyResize` on `TerminalView` or set `engine.onPtyResize` so SIGWINCH follows the engine grid. |
+| `onPtyResize` | `void Function(int columns, int rows)?` | Optional hook invoked by the client **after** a pending resize flush completes (engine grid already updated). `TerminalView` wires its `onPtyResize` constructor arg here automatically. |
 | `write(Uint8List bytes)` | `void` | View -> engine (keystrokes, paste, mouse reports). Echoes on `output`. |
 | `output` | `Stream<Uint8List>` | Engine -> PTY. Drain into `pty.write` once. |
 | `title` | `ValueListenable<String>` | OSC 0/2 title. Mirrors `Event::Title` / `Event::ResetTitle`. |
@@ -157,6 +177,9 @@ parameters:
 | `linkProviders` | `List<TerminalLinkProvider>` | `const []` | Host-injectable regex/path link sources; pass `[UrlLinkProvider()]` for URLs. OSC 8 needs no provider. |
 | `primaryTapActivatesLink` | `bool` | `false` | Plain left-click also fires `onLinkActivate` on link cells (Shift still selects). |
 | `onBell` | `void Function()?` | `null` (plays system alert) | Override the default audible bell. |
+| `onPtyResize` | `void Function(int columns, int rows)?` | `null` | Fires after the view commits an engine resize; resize your PTY here (lazy spawn on first callback). Replaces the removed `onViewportResize`. |
+
+**Breaking change (resize API):** `onViewportResize` and the injectable `resizeController` constructor parameter were removed. Resize policy now lives inside `TerminalView`; hosts only implement `onPtyResize` (or `engine.onPtyResize` for headless wiring).
 
 ## Shortcuts customization
 
@@ -236,6 +259,18 @@ self-contained default (where one exists).
 
 - `onBell` — fires once per `Event::Bell`. If omitted, the view plays
   `SystemSoundType.alert`; supply this to replace or extend the default.
+- `onPtyResize(columns, rows)` — fires after the view's internal resize
+  controller commits `engine.resize`. Typical handler:
+
+  ```dart
+  onPtyResize: (cols, rows) {
+    _pty ??= FlutterPtyBackend(rows: rows, columns: cols);
+    _pty!.resize(rows, cols);
+  },
+  ```
+
+  Do **not** call `engine.resize` from the host for viewport changes — the view
+  owns measurement and coalescing. PTY SIGWINCH must trail the engine grid.
 
 ## Link providers
 

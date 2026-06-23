@@ -106,11 +106,20 @@ class TerminalEngine {
   EngineBinding? _binding;
   bool _disposed = false;
 
+  void Function(int columns, int rows)? _onPtyResize;
+
+  /// Host transport hook. Invoked only after the native engine and mirror grid
+  /// have adopted [columns]×[rows]. Wire to `PtyBackend.resize(rows, columns)`.
+  void Function(int columns, int rows)? get onPtyResize => _onPtyResize;
+  set onPtyResize(void Function(int columns, int rows)? cb) {
+    _onPtyResize = cb;
+    _client?.onPtyResize = cb;
+  }
+
   // Last size handed to [resize]. A full reflow + snapshot is expensive
   // (alacritty re-wraps the whole grid + scrollback, synchronously on the UI
-  // thread), and each layout change drives [resize] twice with identical dims
-  // (TerminalView and the host both call it). Skipping the no-op repeat halves
-  // the cost of a panel/divider/window resize. -1 forces the first call through.
+  // thread). Skipping the no-op repeat avoids redundant FFI work. -1 forces
+  // the first call through.
   int _lastColumns = -1;
   int _lastRows = -1;
 
@@ -362,6 +371,7 @@ class TerminalEngine {
       grid: _grid,
       schedule: schedule,
     );
+    _client!.onPtyResize = _onPtyResize;
     _rewireBindingCallbacks(binding);
     _drainPendingPreBind();
   }

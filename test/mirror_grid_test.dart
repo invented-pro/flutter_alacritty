@@ -126,6 +126,31 @@ void main() {
     expect(g.flagsAt(0, 1) & kFlagWideSpacer, kFlagWideSpacer);
   });
 
+  test('partial line narrower than grid clears trailing columns', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true,
+      rows: 1,
+      columns: 10,
+      lines: [row(0, '0123456789')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    g.apply(GridUpdate(
+      full: false,
+      rows: 0,
+      columns: 0,
+      lines: [row(0, 'ABC')],
+      cursorRow: 0,
+      cursorCol: 3,
+      cursorVisible: true,
+    ));
+    expect(g.codepointAt(0, 2), 'C'.codeUnitAt(0));
+    expect(g.codepointAt(0, 3), 32);
+    expect(g.codepointAt(0, 9), 32);
+  });
+
   test('partial line wider than viewport clamps without throwing', () {
     final g = MirrorGrid();
     g.initializeEmpty(2, 10);

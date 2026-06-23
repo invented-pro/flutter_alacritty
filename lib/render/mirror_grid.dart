@@ -263,6 +263,13 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
       _bg[l.line].setRange(0, copy, l.bg);
       _flags[l.line].setRange(0, copy, l.flags);
       _hyperlinkId[l.line].setRange(0, copy, l.hyperlinkId);
+      if (copy < _columns) {
+        _codepoints[l.line].fillRange(copy, _columns, 32);
+        _fg[l.line].fillRange(copy, _columns, _defaultFg);
+        _bg[l.line].fillRange(copy, _columns, _defaultBg);
+        _flags[l.line].fillRange(copy, _columns, 0);
+        _hyperlinkId[l.line].fillRange(copy, _columns, 0);
+      }
     }
     // Overscan from explicit field (full updates) or sentinel line index (scroll).
     final o = u.overscan;

@@ -3,10 +3,10 @@ part of 'terminal_view.dart';
 /// Pointer, scroll, fling, and selection hit-testing for [TerminalViewState].
 extension _TerminalViewPointer on TerminalViewState {
   (int, int, bool) _cellAt(Offset local) {
-    // Clamp to the COMMITTED grid (`_grid`, the engine's actual size), not the
-    // proposed `_cols/_rows`. Under lock-step the proposed grid can lead the
-    // engine during a drag; clamping to it would let selection/hit-tests address
-    // columns the engine hasn't allocated yet (ghost cells).
+    // Clamp hit-tests to the COMMITTED grid (`_grid`, the engine's actual size).
+    // The proposed layout grid can lead the engine during a drag; clamping to it
+    // would let selection/hit-tests address columns the engine hasn't allocated
+    // yet (ghost cells).
     final maxCol = _grid.columns > 0 ? _grid.columns - 1 : 0;
     final maxRow = _grid.rows > 0 ? _grid.rows - 1 : 0;
     final col = (local.dx / _metrics.width).floor().clamp(0, maxCol);
@@ -154,44 +154,6 @@ extension _TerminalViewPointer on TerminalViewState {
       total += _panSamples[i].$2;
     }
     return total / periodMs * 1000.0;
-  }
-
-  void _syncViewportToHost(int cols, int rows) {
-    if (cols <= 0 || rows <= 0) return;
-    _pendingResizeCols = cols;
-    _pendingResizeRows = rows;
-    // Throttle window already open: just record the latest size; the trailing
-    // flush will apply it. (Avoids per-frame reflow during a drag.)
-    if (_resizeThrottle != null) return;
-    // Leading edge: apply the first change immediately. Runs during
-    // build/layout, so defer the actual resize to the post-frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applyViewportResize());
-    _resizeThrottle = Timer(TerminalViewState._resizeWindow, () {
-      _resizeThrottle = null;
-      // Trailing flush: apply the latest size seen during the window. A no-op
-      // (same size) is coalesced away by the engine's same-size guard.
-      _applyViewportResize();
-    });
-  }
-
-  void _applyViewportResize() {
-    if (!mounted) return;
-    final cols = _pendingResizeCols;
-    final rows = _pendingResizeRows;
-    if (cols <= 0 || rows <= 0) return;
-    _engine.resize(columns: cols, rows: rows);
-    widget.onViewportResize?.call(cols, rows);
-  }
-
-  void __pointerEnsureSizing(int cols, int rows) {
-    if (cols == _cols && rows == _rows) return;
-    _cols = cols;
-    _rows = rows;
-    // Mirror alacritty display/mod.rs: cell grid changes (first layout, font
-    // zoom, window resize) → term.resize(). First layout must notify the host
-    // too — otherwise PTY stays at whatever size the host guessed before the
-    // view mounted (e.g. 80×24) while the painter uses a taller grid.
-    _syncViewportToHost(cols, rows);
   }
 
   void __pointerOnDown(PointerDownEvent e) {

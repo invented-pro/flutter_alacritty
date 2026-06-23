@@ -41,6 +41,11 @@ class TerminalEngineClient {
   bool _scrollScheduled = false;
   bool _scrollApplying = false;
   bool _disposed = false;
+
+  /// Fired only from [_flushPendingResize], after the engine reflow and mirror
+  /// snapshot complete. Host wires this to `PtyBackend.resize`.
+  void Function(int columns, int rows)? onPtyResize;
+
   /// Re-applies the current viewport. Uses [EngineBinding.searchIsActive] to
   /// pick [fullSnapshotSearched] vs [fullSnapshot] so search highlights stay
   /// in sync with the engine without a stale Dart-side search flag.
@@ -99,6 +104,9 @@ class TerminalEngineClient {
     // second overlapping advanceAndTakeDamage on the same engine.
     _advancing = true;
     try {
+      if (_pendingColumns != null || _pendingRows != null) {
+        _flushPendingResize();
+      }
       // Apply coalesced scroll before ingesting PTY bytes. When scrolled back,
       // alacritty's scroll_up increases display_offset; deferring scroll until
       // after the drain lets output outrun wheel-down (can't reach the live end).
@@ -135,8 +143,9 @@ class TerminalEngineClient {
     _pendingRows = rows;
     if (!_advancing) {
       _flushPendingResize();
+    } else {
+      SchedulerBinding.instance.scheduleFrame();
     }
-    SchedulerBinding.instance.scheduleFrame();
   }
 
   void _flushPendingResize() {
@@ -148,6 +157,7 @@ class TerminalEngineClient {
     _binding.resize(columns, rows);
     // Engine resize sets TermDamage::Full; sync snapshot keeps MirrorGrid in sync.
     refreshView();
+    onPtyResize?.call(columns, rows);
   }
 
   Future<void> scrollLines(int delta) async {

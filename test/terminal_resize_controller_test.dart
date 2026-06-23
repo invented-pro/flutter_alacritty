@@ -69,7 +69,7 @@ void main() {
         policy: ImmediateCommitPolicy(), // deterministic for unit tests
         scheduleFrame: frameScheduler.schedule,
       );
-      controller.onPtyResize = (cols, rows) {
+      engine.onPtyResize = (cols, rows) {
         ptyCommits.add((cols: cols, rows: rows));
       };
     });
@@ -83,13 +83,32 @@ void main() {
 
     test('engine resize called on first proposal', () {
       controller.propose(query(80, 24));
+      frameScheduler.flush();
       expect(binding.resizeCalls, greaterThan(0));
       expect(controller.current, const TerminalGrid(80, 24));
+    });
+
+    test('initialGrid seeds current without committing', () {
+      controller.dispose();
+      controller = TerminalResizeController(
+        engine: engine,
+        policy: ImmediateCommitPolicy(),
+        scheduleFrame: frameScheduler.schedule,
+        initialGrid: const TerminalGrid(100, 30),
+      );
+      engine.onPtyResize = (cols, rows) {
+        ptyCommits.add((cols: cols, rows: rows));
+      };
+
+      expect(controller.current, const TerminalGrid(100, 30));
+      expect(binding.resizeCalls, 0);
+      expect(ptyCommits, isEmpty);
     });
 
     test('engine not resized on subsequent proposal (only on commit)', () {
       // First proposal initializes the engine
       controller.propose(query(80, 24));
+      frameScheduler.flush();
       expect(binding.resizeCalls, greaterThan(0));
 
       // Second proposal does NOT resize engine — it waits for policy commit
@@ -197,11 +216,10 @@ void main() {
 
     test('commitNow flushes current grid synchronously', () {
       controller.propose(query(100, 30));
-      frameScheduler.flush();
-      final ptyBefore = ptyCommits.length;
+      expect(ptyCommits, isEmpty);
 
       controller.commitNow();
-      expect(ptyCommits.length, ptyBefore + 1);
+      expect(ptyCommits.length, 1);
       expect(ptyCommits.last.cols, 100);
     });
   });
@@ -226,7 +244,7 @@ void main() {
         policy: StableFrameCommitPolicy(),
         scheduleFrame: frameScheduler.schedule,
       );
-      controller.onPtyResize = (cols, rows) {
+      engine.onPtyResize = (cols, rows) {
         ptyCommits.add((cols: cols, rows: rows));
       };
     });
@@ -237,9 +255,14 @@ void main() {
     });
 
     test('commits PTY after 2 stable frames (matches orca)', () {
-      // First proposal
+      controller.propose(query(80, 24));
+      frameScheduler.flushOne();
+      expect(ptyCommits.length, 1);
+      ptyCommits.clear();
+
+      // Resize burst: first stable frame is not enough.
       controller.propose(query(100, 30));
-      frameScheduler.flushOne(); // frame 1: stability=1, no commit
+      frameScheduler.flushOne();
       expect(ptyCommits, isEmpty);
 
       // Second identical proposal → commit
@@ -250,7 +273,11 @@ void main() {
     });
 
     test('resets on different proposal', () {
-      // One stable frame
+      controller.propose(query(80, 24));
+      frameScheduler.flushOne();
+      ptyCommits.clear();
+
+      // One stable frame on a new size
       controller.propose(query(100, 30));
       frameScheduler.flushOne();
 
@@ -264,6 +291,18 @@ void main() {
       frameScheduler.flushOne();
       expect(ptyCommits.length, 1);
       expect(ptyCommits.first.cols, 120);
+    });
+
+    test('skips commit when proposal matches committed grid (orca parity)', () {
+      for (var i = 0; i < 2; i++) {
+        controller.propose(query(100, 30));
+        frameScheduler.flushOne();
+      }
+      expect(ptyCommits.length, 1);
+
+      controller.propose(query(100, 30));
+      frameScheduler.flushOne();
+      expect(ptyCommits.length, 1);
     });
   });
 }

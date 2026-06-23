@@ -121,8 +121,7 @@ class TerminalView extends StatefulWidget {
     this.onLinkActivate,
     this.primaryTapActivatesLink = false,
     this.onBell,
-    this.onViewportResize,
-    this.resizeController,
+    this.onPtyResize,
     List<TerminalLinkProvider>? linkProviders,
   })  : linkProviders = linkProviders ?? _defaultLinkProviders,
         textStyle = textStyle ?? TerminalStyle.defaults();
@@ -199,19 +198,9 @@ class TerminalView extends StatefulWidget {
   /// view plays a system alert sound (current behavior).
   final void Function()? onBell;
 
-  /// Fired after [engine] is resized to match the view's cell grid (font zoom
-  /// or layout). Hosts should resize the PTY to the same `(columns, rows)`.
-  ///
-  /// **Deprecated.** Use [resizeController] instead — it provides stability
-  /// gating, transaction support, and eliminates the one-frame resize flash.
-  /// When [resizeController] is provided, this callback is NOT called.
-  final void Function(int columns, int rows)? onViewportResize;
-
-  /// Optional per-view resize controller. When provided, the view delegates
-  /// all grid measurement and PTY timing to this controller instead of using
-  /// the legacy throttle+postFrame path. If omitted, the legacy behavior
-  /// ([onViewportResize]) is used for backward compatibility.
-  final TerminalResizeController? resizeController;
+  /// Fired after the engine and mirror grid adopt `(columns, rows)`. Wire to
+  /// `PtyBackend.resize(rows, columns)`. The engine resizes before this fires.
+  final void Function(int columns, int rows)? onPtyResize;
 
   /// Host-injectable link sources. Defaults to `const []` (no per-line regex scan
   /// on PTY output); pass e.g. `[UrlLinkProvider()]` to enable URL detection.
@@ -245,17 +234,8 @@ class TerminalViewState extends State<TerminalView>
   final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
   Timer? _blinkTimer;
 
-  // Throttles layout-driven grid resizes. A `term.resize` is a full, synchronous
-  // reflow of the grid + scrollback; doing it on every frame of a continuous
-  // size change (divider drag) stutters. So we THROTTLE (not debounce): the
-  // first change applies immediately — so a one-shot toggle / window resize is
-  // never left lagging behind its pane (which showed as "width sometimes
-  // smaller") — and further changes inside the window coalesce into one trailing
-  // apply. Debouncing instead delayed even one-shots, leaving the grid stale.
-  Timer? _resizeThrottle;
-  int _pendingResizeCols = 0;
-  int _pendingResizeRows = 0;
-  static const _resizeWindow = Duration(milliseconds: 90);
+  late TerminalResizeController _resizeController;
+
   // Wall-clock of the last terminal input; drives `cursorBlinkTimeout` (blink
   // pauses after inactivity, resumes solid-then-blinking on the next input).
   DateTime _lastInputAt = DateTime.now();
@@ -268,7 +248,6 @@ class TerminalViewState extends State<TerminalView>
   );
   Rect? _lastReportedCaretRect;
 
-  int _cols = 0, _rows = 0;
   bool _lastFocused = false;
   int _pressedButton = 0;
   int _clickCount = 0;
@@ -340,9 +319,18 @@ class TerminalViewState extends State<TerminalView>
   void startFlingForTest(double velocityPxPerSec) =>
       _startFling(velocityPxPerSec);
 
+  @visibleForTesting
+  TerminalResizeController get resizeControllerForTest => _resizeController;
+
+  void _syncPtyResizeHook() {
+    widget.engine.onPtyResize = widget.onPtyResize;
+  }
+
   @override
   void initState() {
     super.initState();
+    _resizeController = TerminalResizeController(engine: widget.engine);
+    _syncPtyResizeHook();
     _controller = widget.controller ?? (TerminalController()..attach(_engine));
     _ownsController = widget.controller == null;
     _focus = widget.focusNode ?? FocusNode();
@@ -409,14 +397,18 @@ class TerminalViewState extends State<TerminalView>
       // Reused view: a kinetic fling coasting at swap time would scroll the
       // swapped-in engine. Stop it so the fling doesn't bleed across members/tabs.
       _stopFling();
-      // TeamPilot-style hosts swap engines per member while the view keeps the
-      // same layout cols/rows. _ensureSizing would skip onViewportResize, leaving
-      // a PTY started in the background at 80×24 while the painter is full-screen.
-      if (widget.resizeController != null) {
-        widget.resizeController!.commitNow();
-      } else {
-        _syncViewportToHost(_cols, _rows);
-      }
+      final seed = _resizeController.committed ?? _resizeController.current;
+      _resizeController.dispose();
+      _resizeController = TerminalResizeController(
+        engine: widget.engine,
+        initialGrid: seed,
+      );
+      _syncPtyResizeHook();
+      // Size the swapped-in engine from layout propose() + post-frame commit —
+      // never commitNow() here (default 80×24 would SIGWINCH the PTY early).
+    }
+    if (widget.onPtyResize != oldWidget.onPtyResize) {
+      _syncPtyResizeHook();
     }
     // Re-attach controller / focus if the caller swapped them out. Rare; the
     // host typically creates both once.
@@ -526,7 +518,7 @@ class TerminalViewState extends State<TerminalView>
   @override
   void dispose() {
     _stopFling();
-    _resizeThrottle?.cancel();
+    _resizeController.dispose();
     _blinkTimer?.cancel();
     _blinkOn.dispose();
     _bellSub?.cancel();
@@ -543,6 +535,9 @@ class TerminalViewState extends State<TerminalView>
     }
     for (final p in widget.linkProviders) {
       p.removeListener(_onProviderChanged);
+    }
+    if (widget.engine.onPtyResize == widget.onPtyResize) {
+      widget.engine.onPtyResize = null;
     }
     super.dispose();
   }
@@ -670,10 +665,8 @@ class TerminalViewState extends State<TerminalView>
   /// commit it immediately afterwards so the engine + PTY adopt the new grid
   /// without waiting for the stability gate or settle timer.
   void _commitAfterMetricsChange() {
-    final ctrl = widget.resizeController;
-    if (ctrl == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ctrl.commitNow();
+      if (mounted) _resizeController.commitNow();
     });
   }
 
@@ -857,23 +850,11 @@ class TerminalViewState extends State<TerminalView>
         final availH =
             (constraints.maxHeight - pad.vertical).clamp(0.0, double.infinity);
 
-        if (widget.resizeController != null) {
-          // New path: delegate to TerminalResizeController — lock-step commit
-          // (engine + PTY resize together at stability), gated by the policy.
-          // Hit-testing reads the committed engine grid (`_grid`) directly, so
-          // `_cols/_rows` are NOT mirrored here — they belong to the legacy path.
-          final query = ViewportQuery(
-            available: Size(availW, availH),
-            cell: _metrics,
-          );
-          widget.resizeController!.propose(query);
-        } else {
-          // Legacy path: floor + clamp + 90ms throttle + postFrame deferral.
-          // Remove when all callers have migrated to TerminalResizeController.
-          final cols = (availW / _metrics.width).floor().clamp(kMinTerminalColumns, 1000);
-          final rows = (availH / _metrics.height).floor().clamp(kMinTerminalRows, 1000);
-          _ensureSizing(cols, rows);
-        }
+        final query = ViewportQuery(
+          available: Size(availW, availH),
+          cell: _metrics,
+        );
+        _resizeController.propose(query);
         _ensureAtlas(MediaQuery.devicePixelRatioOf(context));
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _reportCaretRectToIme());
@@ -1045,5 +1026,4 @@ class TerminalViewState extends State<TerminalView>
   void _onLongPressMoveUpdate(LongPressMoveUpdateDetails e) =>
       __pointerOnLongPressMoveUpdate(e);
   void _onLongPressEnd(LongPressEndDetails e) => __pointerOnLongPressEnd(e);
-  void _ensureSizing(int cols, int rows) => __pointerEnsureSizing(cols, rows);
 }
