@@ -64,6 +64,10 @@ class _CountingFakeBinding implements EngineBinding {
   @override
   Future<GridUpdate> scrollToBottom() async => _empty();
   @override
+  Future<GridUpdate> scrollToTop() async => _empty();
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async => _empty();
+  @override
   void clearHistory() {}
   @override
   void reconfigure(EngineConfig config) {}
@@ -145,6 +149,26 @@ void main() {
     expect(binding.scrollPixelsCalls, 1);
     expect(binding.scrollPixelsArgs.single, closeTo(6.0, 1e-9));
     expect(binding.scrollApplyCalls, 1);
+  });
+
+  test('scrollToBottom clears pending coalesced wheel pixels', () async {
+    final binding = _CountingFakeBinding();
+    final grid = MirrorGrid();
+    late void Function() pending;
+    final client = TerminalEngineClient(
+      binding: binding,
+      grid: grid,
+      schedule: (cb) => pending = cb,
+    );
+
+    client.scheduleScrollByPixels(100);
+    await client.scrollToBottom();
+    expect(binding.scrollPixelsCalls, 0);
+
+    pending();
+    await Future<void>.value();
+
+    expect(binding.scrollPixelsCalls, 0);
   });
 
   test('coalesced delta sums linearly before engine clamp', () async {

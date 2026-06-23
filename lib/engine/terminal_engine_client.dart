@@ -141,11 +141,10 @@ class TerminalEngineClient {
     if (_disposed) return;
     _pendingColumns = columns;
     _pendingRows = rows;
-    if (!_advancing) {
-      _flushPendingResize();
-    } else {
-      SchedulerBinding.instance.scheduleFrame();
-    }
+    // Always flush synchronously so MirrorGrid tracks LayoutBuilder even while
+    // a PTY drain is in flight (avoids painter clearing a viewport-sized area
+    // but only drawing the stale grid row count).
+    _flushPendingResize();
   }
 
   void _flushPendingResize() {
@@ -157,11 +156,35 @@ class TerminalEngineClient {
     _binding.resize(columns, rows);
     // Engine resize sets TermDamage::Full; sync snapshot keeps MirrorGrid in sync.
     refreshView();
-    onPtyResize?.call(columns, rows);
+    _schedulePtyResize(columns, rows);
+  }
+
+  void _schedulePtyResize(int columns, int rows) {
+    void fire() => onPtyResize?.call(columns, rows);
+    try {
+      final phase = SchedulerBinding.instance.schedulerPhase;
+      if (phase == SchedulerPhase.persistentCallbacks ||
+          phase == SchedulerPhase.midFrameMicrotasks) {
+        SchedulerBinding.instance.addPostFrameCallback((_) => fire());
+        return;
+      }
+    } on Object {
+      // Headless tests without a scheduler binding.
+    }
+    fire();
   }
 
   Future<void> scrollLines(int delta) async {
+    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollLines(delta));
+  }
+
+  /// Clears coalesced wheel/pan accumulators so an absolute scroll is not
+  /// undone by a pending post-frame flush (GtkScrollbar sets adjustment value
+  /// directly; VTE cancels kinetic scroll on scrollbar drag).
+  void _clearPendingScroll() {
+    _pendingScrollDelta = 0;
+    _pendingScrollPixels = 0;
   }
 
   /// Coalesced scroll. Multiple calls within one scheduling tick aggregate
@@ -234,7 +257,18 @@ class TerminalEngineClient {
   }
 
   Future<void> scrollToBottom() async {
+    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollToBottom());
+  }
+
+  Future<void> scrollToTop() async {
+    _clearPendingScroll();
+    _applyScrollUpdate(await _binding.scrollToTop());
+  }
+
+  Future<void> scrollToOffset(double offsetLines) async {
+    _clearPendingScroll();
+    _applyScrollUpdate(await _binding.scrollToOffset(offsetLines));
   }
 
   void _applyScrollUpdate(GridUpdate update) {

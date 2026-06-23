@@ -74,6 +74,18 @@ Future<RenderUpdate> engineScrollPixels({
 Future<RenderUpdate> engineScrollToBottom({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineScrollToBottom(engine: engine);
 
+Future<RenderUpdate> engineScrollToTop({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineScrollToTop(engine: engine);
+
+/// Absolute scroll position in lines (`0` = live bottom, `history_size` = top).
+Future<RenderUpdate> engineScrollToOffset({
+  required TerminalEngine engine,
+  required double offsetLines,
+}) => RustLib.instance.api.crateApiTerminalEngineScrollToOffset(
+  engine: engine,
+  offsetLines: offsetLines,
+);
+
 void engineClearHistory({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineClearHistory(engine: engine);
 

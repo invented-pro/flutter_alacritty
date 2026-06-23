@@ -132,6 +132,11 @@ class TerminalEngine {
   final BytesBuilder _pendingFeed = BytesBuilder(copy: false);
   ({int width, int height})? _pendingCellPixels;
   EngineConfig? _pendingReconfig;
+  int _cellPixelHeight = 0;
+
+  /// Last cell height passed to [setCellPixels]. Used by hosts for pixel scroll
+  /// math (scrollbar drags, etc.) so they stay aligned with the engine.
+  double get cellPixelHeight => _cellPixelHeight.toDouble();
 
   /// Whether the native binding has been created (i.e. a real size has landed).
   bool get isBound => _client != null;
@@ -341,6 +346,15 @@ class TerminalEngine {
     await _client?.scrollToBottom();
   }
 
+  Future<void> scrollToTop() async {
+    await _client?.scrollToTop();
+  }
+
+  /// Absolute scroll offset in lines (`0` = live bottom, `historySize` = top).
+  Future<void> scrollToOffset(double offsetLines) async {
+    await _client?.scrollToOffset(offsetLines);
+  }
+
   /// Clear scrollback history (alacritty ClearHistory). No-op until bound.
   void clearHistory() => _client?.clearHistory();
 
@@ -359,6 +373,7 @@ class TerminalEngine {
   /// Carries no grid dimensions, so it never creates the binding; if it arrives
   /// before sizing it is stashed and applied when the grid is built.
   void setCellPixels(int width, int height) {
+    _cellPixelHeight = height;
     if (_binding == null) {
       _pendingCellPixels = (width: width, height: height);
       return;

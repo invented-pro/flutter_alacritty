@@ -2,25 +2,35 @@ part of 'terminal_view.dart';
 
 /// Pointer, scroll, fling, and selection hit-testing for [TerminalViewState].
 extension _TerminalViewPointer on TerminalViewState {
-  (int, int, bool) _cellAt(Offset local) {
-    // Clamp hit-tests to the COMMITTED grid (`_grid`, the engine's actual size).
-    // The proposed layout grid can lead the engine during a drag; clamping to it
-    // would let selection/hit-tests address columns the engine hasn't allocated
-    // yet (ghost cells).
+  (int, int, bool) _cellAt(Offset local, {bool inCellLayer = false}) {
+    final vp = _viewport;
+    final cellLocal = (!inCellLayer && vp != null)
+        ? Offset(local.dx - vp.paddingX, local.dy - vp.paddingY)
+        : local;
     final maxCol = _grid.columns > 0 ? _grid.columns - 1 : 0;
     final maxRow = _grid.rows > 0 ? _grid.rows - 1 : 0;
-    final col = (local.dx / _metrics.width).floor().clamp(0, maxCol);
-    // The painter shifts content down by `scrollFraction * cellHeight` for
-    // sub-cell scroll; undo it here so hit-testing (selection, hover) lands on
-    // the row the user actually sees rather than the unscrolled grid row.
-    final yRows = local.dy / _metrics.height - _grid.scrollFraction;
+    final col = (cellLocal.dx / _metrics.width).floor().clamp(0, maxCol);
+    final yRows = cellLocal.dy / _metrics.height - _grid.scrollFraction;
     final row = yRows.floor().clamp(0, maxRow);
-    final rightHalf = (local.dx / _metrics.width) - col > 0.5;
+    final rightHalf = (cellLocal.dx / _metrics.width) - col > 0.5;
     return (row, col, rightHalf);
   }
 
-  void _updateHoverCursor(Offset local) {
-    final (r, c, _) = _cellAt(local);
+  /// Whether [local] (listener or cell-layer coords) lies over painted cells.
+  bool _pointerOverCells(Offset local, {bool inCellLayer = false}) {
+    final vp = _viewport;
+    if (vp == null) return true;
+    if (inCellLayer) {
+      return local.dx >= 0 &&
+          local.dy >= 0 &&
+          local.dx < vp.cellAreaWidth &&
+          local.dy < vp.cellAreaHeight;
+    }
+    return vp.cellRect.contains(local);
+  }
+
+  void _updateHoverCursor(Offset local, {bool inCellLayer = false}) {
+    final (r, c, _) = _cellAt(local, inCellLayer: inCellLayer);
     final inBounds = _grid.rows > r && _grid.columns > c;
     if (inBounds) {
       _onHoverRowChanged(r);
@@ -42,12 +52,15 @@ extension _TerminalViewPointer on TerminalViewState {
   void _refreshSelection() => _engine.refreshView();
 
   void _reportMouse(Offset local, int button, MouseAction action) {
-    // Report against the committed engine grid (see [_cellAt]) so a drag that
-    // outpaces the PTY never sends out-of-range mouse coordinates to the program.
+    if (!_pointerOverCells(local)) return;
+    final vp = _viewport;
+    final cellLocal = vp != null
+        ? Offset(local.dx - vp.paddingX, local.dy - vp.paddingY)
+        : local;
     final maxCol = _grid.columns > 0 ? _grid.columns - 1 : 0;
     final maxRow = _grid.rows > 0 ? _grid.rows - 1 : 0;
-    final col = (local.dx / _metrics.width).floor().clamp(0, maxCol) + 1;
-    final row = (local.dy / _metrics.height).floor().clamp(0, maxRow) + 1;
+    final col = (cellLocal.dx / _metrics.width).floor().clamp(0, maxCol) + 1;
+    final row = (cellLocal.dy / _metrics.height).floor().clamp(0, maxRow) + 1;
     final hw = HardwareKeyboard.instance;
     final bytes = encodeMouse(button, action, col, row,
         shift: hw.isShiftPressed,
@@ -269,14 +282,14 @@ extension _TerminalViewPointer on TerminalViewState {
   void __pointerOnLongPressStart(LongPressStartDetails e) {
     _scrollController.stopFling();
     _focus.requestFocus();
-    final (r, c, rh) = _cellAt(e.localPosition);
+    final (r, c, rh) = _cellAt(e.localPosition, inCellLayer: true);
     _controller.selectionStart(r, c, rh, 0);
     _selecting = true;
     _refreshSelection();
   }
 
   void __pointerOnLongPressMoveUpdate(LongPressMoveUpdateDetails e) {
-    final (r, c, rh) = _cellAt(e.localPosition);
+    final (r, c, rh) = _cellAt(e.localPosition, inCellLayer: true);
     _controller.selectionUpdate(r, c, rh);
     _refreshSelection();
   }

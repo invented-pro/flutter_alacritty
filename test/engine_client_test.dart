@@ -61,6 +61,10 @@ class _SearchFake implements EngineBinding {
   @override
   Future<GridUpdate> scrollToBottom() async => _empty();
   @override
+  Future<GridUpdate> scrollToTop() async => _empty();
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async => _empty();
+  @override
   void clearHistory() {}
   @override
   void reconfigure(EngineConfig config) {}
@@ -120,6 +124,10 @@ class _SlowFakeBinding implements EngineBinding {
   Future<GridUpdate> scrollPixels(double deltaPx) async => _empty();
   @override
   Future<GridUpdate> scrollToBottom() async => _empty();
+  @override
+  Future<GridUpdate> scrollToTop() async => _empty();
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async => _empty();
   @override
   void clearHistory() {}
   @override
@@ -196,6 +204,10 @@ class _FakeBinding implements EngineBinding {
   Future<GridUpdate> scrollPixels(double deltaPx) async => fullSnapshot();
   @override
   Future<GridUpdate> scrollToBottom() async => fullSnapshot();
+  @override
+  Future<GridUpdate> scrollToTop() async => fullSnapshot();
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async => fullSnapshot();
   @override
   void clearHistory() {}
   @override

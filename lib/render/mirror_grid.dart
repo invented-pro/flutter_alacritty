@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 /// Sentinel [LineCells.line] on incremental scroll FFI updates (matches Rust
 /// `OVERSCAN_LINE_TAG`). Full snapshots tag overscan with `screen_lines` instead.
@@ -46,6 +47,7 @@ class GridUpdate {
     this.cursorBlinking = false,
     this.modeFlags = 0,
     this.displayOffset = 0,
+    this.historySize = 0,
     this.defaultFg = 0xD8D8D8,
     this.defaultBg = 0x181818,
     this.cursorColor = 0xFF000000,
@@ -64,6 +66,9 @@ class GridUpdate {
   final bool cursorBlinking;
   final int modeFlags;
   final int displayOffset;
+
+  /// Scrollback lines above the viewport (`total_lines - screen_lines`).
+  final int historySize;
   final int defaultFg;
   final int defaultBg;
   final int cursorColor;
@@ -100,6 +105,9 @@ abstract class TerminalGridView implements Listenable {
   bool get cursorBlinking;
   int get modeFlags;
   int get displayOffset;
+
+  /// Lines of scrollback above the viewport. Drives scrollbar geometry.
+  int get historySize;
   /// Program-set cursor color (OSC 12), or 0xFF000000 ([kCursorColorUnset]) when
   /// unset — in which case painters keep their inverse-video cursor.
   int get cursorColor;
@@ -153,6 +161,7 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   bool _cursorBlinking = false;
   int _modeFlags = 0;
   int _displayOffset = 0;
+  int _historySize = 0;
   double _scrollFraction = 0;
   // Overscan line (row -1): the row just above the viewport top, painted in the
   // sliver revealed when _scrollFraction > 0. Always sized to _columns.
@@ -161,6 +170,29 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   Uint32List _overBg = Uint32List(0);
   Uint16List _overFlags = Uint16List(0);
   Uint32List _overHyperlinkId = Uint32List(0);
+  bool _repaintNotifyScheduled = false;
+
+  /// Notifies repaint listeners. Deferred to post-frame when called from layout
+  /// (e.g. synchronous viewport apply inside [LayoutBuilder]) so dependents
+  /// like [TerminalHistoryScrollbar] do not setState during build.
+  void _notifyRepaint() {
+    try {
+      final phase = SchedulerBinding.instance.schedulerPhase;
+      if (phase == SchedulerPhase.persistentCallbacks ||
+          phase == SchedulerPhase.midFrameMicrotasks) {
+        if (_repaintNotifyScheduled) return;
+        _repaintNotifyScheduled = true;
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          _repaintNotifyScheduled = false;
+          notifyListeners();
+        });
+        return;
+      }
+    } on Object {
+      // No scheduler binding (headless unit tests) — notify synchronously.
+    }
+    notifyListeners();
+  }
 
   /// Bumps on every [apply] / [initializeEmpty]; used by [TerminalPainter.shouldRepaint].
   @override
@@ -184,6 +216,8 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   int get modeFlags => _modeFlags;
   @override
   int get displayOffset => _displayOffset;
+  @override
+  int get historySize => _historySize;
   @override
   int get cursorColor => _cursorColor;
   @override
@@ -232,7 +266,7 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
     _cursorCol = 0;
     _cursorVisible = true;
     _generation++;
-    notifyListeners();
+    _notifyRepaint();
   }
 
   void apply(GridUpdate u) {
@@ -284,8 +318,11 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
     _cursorBlinking = u.cursorBlinking;
     _modeFlags = u.modeFlags;
     _displayOffset = u.displayOffset;
+    if (u.full || u.historySize > 0) {
+      _historySize = u.historySize;
+    }
     _generation++;
-    notifyListeners();
+    _notifyRepaint();
   }
 
   void _rotateRows(int delta) {

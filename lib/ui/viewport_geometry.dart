@@ -6,9 +6,7 @@ import '../render/cell_metrics.dart';
 /// The grid that fits a terminal viewport at its current font metrics.
 ///
 /// Always represents a usable terminal: [cols] ≥ [minCols], [rows] ≥ [minRows].
-/// Constructed by [ViewportGeometryResolver] only when the viewport is large
-/// enough; callsites receive `null` when the container is in a transitional
-/// layout and should not push a degenerate grid to the PTY.
+/// Constructed by [ViewportResolver] (always at least [minCols]×[minRows]).
 @immutable
 class TerminalGrid {
   final int cols;
@@ -45,10 +43,6 @@ class TerminalGrid {
   @override
   int get hashCode => Object.hash(cols, rows);
 
-  /// Sentinel value guaranteed to never match any real grid. Used by
-  /// [TerminalResizeController] to force the first PTY commit.
-  static const TerminalGrid sentinel = TerminalGrid(65535, 65535);
-
   @override
   String toString() => 'TerminalGrid($cols×$rows)';
 }
@@ -79,42 +73,3 @@ class ViewportQuery {
   });
 }
 
-/// Pure-function resolver: maps a [ViewportQuery] to a [TerminalGrid].
-///
-/// No state, no timers, no callbacks — safe to call every frame from a
-/// [LayoutBuilder]. The resolver's job is measurement; policy decisions
-/// about *when* to commit the result to the PTY belong to
-/// [ResizeCommitPolicy].
-class ViewportGeometryResolver {
-  const ViewportGeometryResolver();
-
-  /// Returns the grid that fits [query], or `null` when the viewport is
-  /// too small to host a usable terminal.
-  ///
-  /// `null` means "don't change the grid" — the viewport is in a layout
-  /// transition and pushing a degenerate size to the PTY would cause the
-  /// visible jump this architecture eliminates.
-  TerminalGrid? resolve(ViewportQuery query) {
-    final availW =
-        (query.available.width - query.reserve.horizontal)
-            .clamp(0.0, double.infinity);
-    final availH =
-        (query.available.height - query.reserve.vertical)
-            .clamp(0.0, double.infinity);
-
-    if (availW <= 0 || availH <= 0) return null;
-
-    // Pixel floor (orca's canMeasurePaneForFit): reject transition frames whose
-    // container is too small to host a usable terminal, before cell math.
-    if (availW < TerminalGrid.minWidthPx || availH < TerminalGrid.minHeightPx) {
-      return null;
-    }
-
-    final cols = (availW / query.cell.width).floor();
-    final rows = (availH / query.cell.height).floor();
-
-    if (!TerminalGrid.isUsable(cols, rows)) return null;
-
-    return TerminalGrid(cols, rows);
-  }
-}

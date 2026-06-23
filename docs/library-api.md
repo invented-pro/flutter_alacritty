@@ -79,10 +79,34 @@ class _TerminalScaffoldState extends State<TerminalScaffold> {
 ```
 
 That is the minimum-viable consumer: ~50 lines including imports and lifecycle.
-`TerminalView` measures its own cell size, commits engine resize via an internal
-`TerminalResizeController`, then fires `onPtyResize` so the host can SIGWINCH
-the PTY **after** the engine grid matches — the host does not compute
-columns/rows or call `engine.resize` separately.
+`TerminalView` measures its cell size on each layout pass, synchronously resizes
+the engine and mirror via an internal `TerminalViewportController`, then fires
+`onPtyResize` so the host can SIGWINCH the PTY **after** the engine grid
+matches — the host does not compute columns/rows or call `engine.resize`
+separately.
+
+## Viewport model (`TerminalViewport`)
+
+Resize is owned by a single viewport tuple (Alacritty `SizeInfo` analogue):
+
+| Type | Role |
+| --- | --- |
+| `TerminalViewport` | Committed pixel layout: `columns`×`screenLines`, `cellWidth`/`cellHeight`, letterbox `paddingX`/`paddingY`, `cellRect`, `ptyWindowSize`. |
+| `ViewportResolver` | Maps a `ViewportQuery` (available size + `CellMetrics`) to a `TerminalViewport`. Always returns a usable grid; fractional pixels become centered padding. |
+| `TerminalViewportController` | Called from `TerminalView`'s `LayoutBuilder` on every layout; resizes engine+mirror synchronously; defers PTY SIGWINCH by one frame unless held. |
+
+Hosts that animate chrome (sidebar) and want to avoid SIGWINCH spam bracket the
+animation with `beginPtyHold` / `endPtyHold` on `TerminalViewState` (reach via
+`GlobalKey<TerminalViewState>`):
+
+```dart
+final _terminalKey = GlobalKey<TerminalViewState>();
+
+// ...
+_terminalKey.currentState?.beginPtyHold();
+// animate sidebar …
+_terminalKey.currentState?.endPtyHold(); // flushes one SIGWINCH if grid changed
+```
 
 ## TerminalEngine API
 
@@ -103,9 +127,10 @@ first `feed` or `resize` call, so cheap to hold in tests or before layout.
 | `clipboardStore` | `Stream<String>` | One event per OSC 52 SET; usually piped to `Clipboard.setData`. |
 | `hyperlinkAt(row, col)` | `String?` | URI under the given cell, or null. Used for Ctrl+click and right-click "Open Hyperlink". |
 | `repaint` | `Listenable` | Notifies on grid damage; if you write a custom painter, use this in `CustomPaint(repaint: ...)`. |
+| `grid` | `TerminalGridView` | Read-only mirror: cells, cursor, `displayOffset`, `scrollFraction`, `historySize` (live scrollback lines above the viewport = `total_lines − screen_lines`), `modeFlags`. |
 | `selectionText()` | `String?` | Engine-side selection text (already shaped & rewrapped). |
 | `searchSet`, `searchNext`, `searchPrev`, `searchClear` | search proxies | Direct passthroughs; consumers usually go via `TerminalController`. |
-| `scrollLines(delta)`, `scrollToBottom()` | `Future<void>` | Viewport scroll. |
+| `scrollLines(delta)`, `scrollToBottom()`, `scrollToTop()`, `scrollToOffset(lines)` | `Future<void>` | Viewport scroll. `scrollToOffset` sets an absolute GtkAdjustment-style position (`0` = live bottom, `historySize` = top). Fire-and-forget wheel/pan uses `scrollBy` / `scrollByPixels` instead. |
 | `initializeEmpty(rows, columns)` | `void` | Optional: paints a blank grid before the first damage arrives. |
 | `dispose()` | `void` | Closes streams + tears down the native engine. Idempotent. |
 
@@ -140,8 +165,10 @@ Groupings:
   always valid), `searchNext()`, `searchPrev()`, `searchClear()`. The
   notifier-backed `searchPattern` / `searchValid` getters drive the host's
   search-bar UI.
-- **Scroll** — `scrollLines(delta)`, `scrollToBottom()` (both
-  `Future<void>` so async scrolling sequences are awaitable).
+- **Scroll** — `scrollLines(delta)`, `scrollToBottom()`, `scrollToTop()`,
+  `scrollToOffset(lines)` (all `Future<void>`). Absolute edge hops cancel any
+  coalesced wheel/pan accumulators so scrollbar / ScrollTo* gestures are not
+  undone on the next frame.
 
 Reading getters: `selectionActive`, `primary`, `searchPattern`, `searchValid`.
 
@@ -179,7 +206,12 @@ parameters:
 | `onBell` | `void Function()?` | `null` (plays system alert) | Override the default audible bell. |
 | `onPtyResize` | `void Function(int columns, int rows)?` | `null` | Fires after the view commits an engine resize; resize your PTY here (lazy spawn on first callback). Replaces the removed `onViewportResize`. |
 
-**Breaking change (resize API):** `onViewportResize` and the injectable `resizeController` constructor parameter were removed. Resize policy now lives inside `TerminalView`; hosts only implement `onPtyResize` (or `engine.onPtyResize` for headless wiring).
+**Breaking change (resize API):** `onViewportResize`, `TerminalResizeController`,
+and `StableFrameCommitPolicy` were removed. Resize policy now lives inside
+`TerminalView` via `TerminalViewportController`; hosts only implement
+`onPtyResize` (or `engine.onPtyResize` for headless wiring). Use
+`beginPtyHold` / `endPtyHold` on `TerminalViewState` to suppress PTY SIGWINCH
+during chrome animation.
 
 ## Shortcuts customization
 
@@ -259,8 +291,8 @@ self-contained default (where one exists).
 
 - `onBell` — fires once per `Event::Bell`. If omitted, the view plays
   `SystemSoundType.alert`; supply this to replace or extend the default.
-- `onPtyResize(columns, rows)` — fires after the view's internal resize
-  controller commits `engine.resize`. Typical handler:
+- `onPtyResize(columns, rows)` — fires after the view's internal
+  `TerminalViewportController` commits `engine.resize`. Typical handler:
 
   ```dart
   onPtyResize: (cols, rows) {
@@ -270,7 +302,8 @@ self-contained default (where one exists).
   ```
 
   Do **not** call `engine.resize` from the host for viewport changes — the view
-  owns measurement and coalescing. PTY SIGWINCH must trail the engine grid.
+  owns measurement. PTY SIGWINCH trails the engine grid (deferred one frame
+  during layout; suppressed entirely while `beginPtyHold` is active).
 
 ## Link providers
 
