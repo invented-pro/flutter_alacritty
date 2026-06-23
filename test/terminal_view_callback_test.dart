@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/terminal_engine.dart';
 import 'package:flutter_alacritty/links/terminal_link_provider.dart';
+import 'package:flutter_alacritty/links/url_link_provider.dart';
 import 'package:flutter_alacritty/ui/terminal_view.dart';
 
 import 'fake_binding.dart';
@@ -343,10 +344,6 @@ void main() {
     expect(launched, isNull);
   });
 
-  // -------------------------------------------------------------------------
-  // Link provider (overlay) tests
-  // -------------------------------------------------------------------------
-
   testWidgets('linkOverlay decorates hovered row when provider matches',
       (tester) async {
     const matchText = 'STUB_LINK';
@@ -523,5 +520,55 @@ void main() {
 
     expect(state.linkOverlayForTest.isLinkCell(0, 0), isTrue,
         reason: 'provider notifyListeners should refresh the hovered row');
+  });
+
+  testWidgets('empty linkProviders: Ctrl+click does not scan provider URLs',
+      (tester) async {
+    final binding = TextFakeBinding('https://example.org');
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    String? launched;
+    await _pumpView(
+      tester,
+      engine: engine,
+      linkProviders: const [],
+      onLinkActivate: (uri) => launched = uri,
+    );
+
+    final pos = tester.getTopLeft(find.byType(CustomPaint).first) +
+        const Offset(2, 2);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final click = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await click.up();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(launched, isNull);
+  });
+
+  testWidgets('provider link activates on Ctrl+click without prior hover',
+      (tester) async {
+    final binding = TextFakeBinding('https://example.org');
+    final engine = await _engineForView(binding);
+    addTearDown(engine.dispose);
+
+    String? launched;
+    await _pumpView(
+      tester,
+      engine: engine,
+      linkProviders: [UrlLinkProvider()],
+      onLinkActivate: (uri) => launched = uri,
+    );
+
+    final pos = tester.getTopLeft(find.byType(CustomPaint).first) +
+        const Offset(2, 2);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final click = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
+    await click.up();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(launched, 'https://example.org');
   });
 }

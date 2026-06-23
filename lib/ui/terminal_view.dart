@@ -213,8 +213,9 @@ class TerminalView extends StatefulWidget {
   /// ([onViewportResize]) is used for backward compatibility.
   final TerminalResizeController? resizeController;
 
-  /// Host-injectable link sources. Defaults to a single URL provider so plain
-  /// consumers keep clickable URLs for free. Pass `const []` to disable.
+  /// Host-injectable link sources. Defaults to `const []` (no per-line regex scan
+  /// on PTY output); pass e.g. `[UrlLinkProvider()]` to enable URL detection.
+  /// OSC 8 hyperlinks from the engine work without any provider.
   final List<TerminalLinkProvider> linkProviders;
 
   @override
@@ -537,7 +538,9 @@ class TerminalViewState extends State<TerminalView>
     _bellCtrl.dispose();
     _glyphs.dispose();
     _disposeAtlas();
-    _grid.removeListener(_onGridLinkContextChanged);
+    if (widget.linkProviders.isNotEmpty) {
+      _grid.removeListener(_onGridLinkContextChanged);
+    }
     for (final p in widget.linkProviders) {
       p.removeListener(_onProviderChanged);
     }
@@ -625,17 +628,6 @@ class TerminalViewState extends State<TerminalView>
     if (next != _linkOverlay) setState(() => _linkOverlay = next);
   }
 
-  bool _isProviderLinkCell(int row, int col) {
-    if (widget.linkProviders.isEmpty) return false;
-    final text = _lineText(row);
-    for (final provider in widget.linkProviders) {
-      for (final span in provider.scan(text)) {
-        if (provider.isEnabled(span) && span.contains(col)) return true;
-      }
-    }
-    return false;
-  }
-
   String _lineText(int row) {
     final sb = StringBuffer();
     for (var c = 0; c < _grid.columns; c++) {
@@ -648,6 +640,7 @@ class TerminalViewState extends State<TerminalView>
   // LinkOverlay stores only cell ranges (not payloads); re-scan the line on
   // click to recover the covering span's payload.
   String? _payloadAt(int row, int col) {
+    if (widget.linkProviders.isEmpty) return null;
     final text = _lineText(row);
     for (final provider in widget.linkProviders) {
       for (final span in provider.scan(text)) {

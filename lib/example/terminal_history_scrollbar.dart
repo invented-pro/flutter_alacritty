@@ -74,7 +74,10 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
     setState(() {});
   }
 
-  int get _historyCap => widget.historyLines.clamp(0, 1 << 20);
+  int get _historyCap =>
+      // Example-only: uses config scrollback, not a live engine query — keep in
+      // sync with `TerminalConfig.scrolling.history` after reconfigure.
+      widget.historyLines.clamp(0, 1 << 20);
 
   /// Lines the viewport can move through when scrollback is full.
   int get _trackLines {

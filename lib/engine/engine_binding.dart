@@ -203,10 +203,9 @@ class FrbEngineBinding implements EngineBinding {
   void dispose() {}
 
   GridUpdate _toGridUpdate(RenderUpdate u) {
-    // A full update appends one trailing overscan row (the line just above the
-    // viewport top) after the screen_lines viewport rows. Incremental scroll
-    // refreshes tag overscan with [OVERSCAN_LINE_TAG] instead.
-    const overscanTag = 0xFFFFFFFF;
+    // Full updates append overscan as `lines.last` with `line == screen_lines`.
+    // Incremental scroll refreshes use [kOverscanLineTag] on the overscan row.
+    // Both paths must stay aligned with the Rust engine's packing conventions.
     final hasOverscan = u.full && u.lines.isNotEmpty;
     final viewportCount = hasOverscan ? u.lines.length - 1 : u.lines.length;
     final viewport = <LineCells>[];
@@ -214,7 +213,7 @@ class FrbEngineBinding implements EngineBinding {
     for (final l in u.lines) {
       if (u.full) {
         if (l.line < viewportCount) viewport.add(_lineCells(l));
-      } else if (l.line == overscanTag) {
+      } else if (l.line == kOverscanLineTag) {
         overscan = _lineCells(l);
       } else {
         viewport.add(_lineCells(l));

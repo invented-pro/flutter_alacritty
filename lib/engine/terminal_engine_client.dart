@@ -41,11 +41,9 @@ class TerminalEngineClient {
   bool _scrollScheduled = false;
   bool _scrollApplying = false;
   bool _disposed = false;
-  /// Re-applies the current viewport. Always uses the searched snapshot — the
-  /// Rust side short-circuits to a plain snapshot when no search is active, so
-  /// this is the same cost when idle and removes a class of Dart-side flag-
-  /// desync bugs (e.g. a stale _searchActive after engine restart leaving
-  /// match highlights stuck or absent).
+  /// Re-applies the current viewport. Uses [EngineBinding.searchIsActive] to
+  /// pick [fullSnapshotSearched] vs [fullSnapshot] so search highlights stay
+  /// in sync with the engine without a stale Dart-side search flag.
   void refreshView() {
     if (_disposed) return;
     final update = _binding.searchIsActive()
@@ -231,7 +229,7 @@ class TerminalEngineClient {
 
   void _applyScrollUpdate(GridUpdate update) {
     if (_disposed) return;
-    _grid.apply(update);
+    _applyUpdate(update);
     SchedulerBinding.instance.scheduleFrame();
   }
 

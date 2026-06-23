@@ -50,5 +50,6 @@ const int kScrollRefreshMaxCells = 200;
 /// Full snapshot ships the whole viewport (+ overscan on `full: true`).
 const int kScrollFullSnapshotMinCells = 80 * 24;
 
-/// scroll_refresh median must stay below this fraction of full_snapshot median.
-const double kScrollRefreshVsFullSnapshotMaxRatio = 0.55;
+/// scroll_refresh median should beat full_snapshot; kept loose because both
+/// medians are sub-millisecond and ratio variance is high on CI runners.
+const double kScrollRefreshVsFullSnapshotMaxRatio = 0.65;

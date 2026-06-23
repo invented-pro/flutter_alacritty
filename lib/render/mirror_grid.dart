@@ -2,6 +2,10 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
+/// Sentinel [LineCells.line] on incremental scroll FFI updates (matches Rust
+/// `OVERSCAN_LINE_TAG`). Full snapshots tag overscan with `screen_lines` instead.
+const int kOverscanLineTag = 0xFFFFFFFF;
+
 /// Sentinel `cursorColor` meaning "no OSC 12 set" (matches Rust CURSOR_COLOR_UNSET).
 const int kCursorColorUnset = 0xFF000000;
 

@@ -154,6 +154,8 @@ parameters:
 | `onTapDown` / `onTapUp` | `void Function(TapDownDetails/TapUpDetails, CellOffset)?` | `null` | Primary-button hooks with cell coordinate. |
 | `onSecondaryTapDown` / `onSecondaryTapUp` | `void Function(TapDownDetails/TapUpDetails, CellOffset)?` | `null` | Right-click hooks; the host shows its context menu here. |
 | `onLinkActivate` | `void Function(String uri)?` | `null` | Fires on Ctrl+click over a hyperlink; the host launches the URI. |
+| `linkProviders` | `List<TerminalLinkProvider>` | `const []` | Host-injectable regex/path link sources; pass `[UrlLinkProvider()]` for URLs. OSC 8 needs no provider. |
+| `primaryTapActivatesLink` | `bool` | `false` | Plain left-click also fires `onLinkActivate` on link cells (Shift still selects). |
 | `onBell` | `void Function()?` | `null` (plays system alert) | Override the default audible bell. |
 
 ## Shortcuts customization
@@ -263,7 +265,7 @@ view re-decorates on the next debounced pass.
 ```dart
 TerminalView(
   engine,
-  // Default is [UrlLinkProvider()]; pass const [] to disable links entirely.
+  // Default is const [] (no regex link scan). Pass [UrlLinkProvider()] for URLs.
   linkProviders: [UrlLinkProvider(), MyFilePathProvider(...)],
   onLinkActivate: (payload) => openItSomehow(payload),
 )

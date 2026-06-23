@@ -206,4 +206,117 @@ void main() {
     expect(grid.bgAt(0, 0), 0xFF0000);
     expect(grid.cursorColor, 0x0000FF);
   });
+
+  test('scrollLineDelta +1 rotates viewport rows and applies the new top line',
+      () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true,
+      rows: 3,
+      columns: 2,
+      lines: [row(0, 'A0'), row(1, 'B1'), row(2, 'C2')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    g.apply(GridUpdate(
+      full: false,
+      rows: 0,
+      columns: 0,
+      scrollLineDelta: 1,
+      lines: [row(0, 'N0')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+      displayOffset: 1,
+    ));
+    expect(g.codepointAt(0, 0), 'N'.codeUnitAt(0));
+    expect(g.codepointAt(1, 0), 'A'.codeUnitAt(0));
+    expect(g.codepointAt(2, 0), 'B'.codeUnitAt(0));
+  });
+
+  test('scrollLineDelta -1 rotates viewport rows down', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true,
+      rows: 3,
+      columns: 1,
+      lines: [row(0, 'A'), row(1, 'B'), row(2, 'C')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    g.apply(GridUpdate(
+      full: false,
+      rows: 0,
+      columns: 0,
+      scrollLineDelta: -1,
+      lines: [row(2, 'Z')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    expect(g.codepointAt(0, 0), 'B'.codeUnitAt(0));
+    expect(g.codepointAt(1, 0), 'C'.codeUnitAt(0));
+    expect(g.codepointAt(2, 0), 'Z'.codeUnitAt(0));
+  });
+
+  test('scrollLineDelta beyond row count clamps rotation', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true,
+      rows: 2,
+      columns: 1,
+      lines: [row(0, 'A'), row(1, 'B')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    g.apply(GridUpdate(
+      full: false,
+      rows: 0,
+      columns: 0,
+      scrollLineDelta: 99,
+      lines: [row(0, 'X')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    expect(g.codepointAt(0, 0), 'X'.codeUnitAt(0));
+    expect(g.codepointAt(1, 0), 'B'.codeUnitAt(0));
+  });
+
+  test('incremental overscan via kOverscanLineTag', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true,
+      rows: 2,
+      columns: 2,
+      lines: [row(0, 'ab'), row(1, 'cd')],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+    ));
+    g.apply(GridUpdate(
+      full: false,
+      rows: 0,
+      columns: 0,
+      scrollLineDelta: 0,
+      lines: [
+        LineCells(
+          line: kOverscanLineTag,
+          codepoints: Uint32List.fromList('OV'.codeUnits),
+          fg: Uint32List(2),
+          bg: Uint32List(2),
+          flags: Uint16List(2),
+        ),
+      ],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+      scrollFraction: 0.25,
+    ));
+    expect(g.scrollFraction, 0.25);
+    expect(g.codepointAt(-1, 0), 'O'.codeUnitAt(0));
+  });
 }
