@@ -162,7 +162,7 @@ extension _TerminalViewPointer on TerminalViewState {
     // Leading edge: apply the first change immediately. Runs during
     // build/layout, so defer the actual resize to the post-frame.
     WidgetsBinding.instance.addPostFrameCallback((_) => _applyViewportResize());
-    _resizeThrottle = Timer(_resizeWindow, () {
+    _resizeThrottle = Timer(TerminalViewState._resizeWindow, () {
       _resizeThrottle = null;
       // Trailing flush: apply the latest size seen during the window. A no-op
       // (same size) is coalesced away by the engine's same-size guard.
