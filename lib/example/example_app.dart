@@ -16,6 +16,7 @@ import '../render/cell_metrics.dart';
 import '../ui/search_bar.dart';
 import '../ui/terminal_shortcuts.dart';
 import '../ui/terminal_view.dart';
+import 'terminal_history_scrollbar.dart';
 
 String _shellQuote(String s) {
   const needs = [
@@ -426,88 +427,93 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
                     },
                   ),
                 },
-                child: Stack(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_engine != null)
-                      TerminalView(
-                        _engine!,
-                        key: _viewKey,
-                        onViewportResize: _onViewportResize,
-                        controller: _controller,
-                        theme: _config.theme,
-                        textStyle: _config.style,
-                        padding: EdgeInsets.symmetric(
-                            horizontal: _config.window.padding.x,
-                            vertical: _config.window.padding.y),
-                        focusNode: _focus,
-                        autofocus: true,
-                        cursorBlinkInterval: Duration(
-                            milliseconds: _config.cursor.blinkInterval),
-                        cursorBlinkTimeout:
-                            Duration(seconds: _config.cursor.blinkTimeout),
-                        bellDuration:
-                            Duration(milliseconds: _config.bell.duration),
-                        doubleClickThreshold: Duration(
-                            milliseconds: _config.mouse.doubleClickThreshold),
-                        scrollMultiplier: _config.scrolling.multiplier,
-                        preeditBg: _config.ime.preeditBg,
-                        preeditFg: _config.ime.preeditFg,
-                        preeditUnderline: _config.ime.underline,
-                        shortcuts: _binds.$1,
-                        // Host-side overrides only — the view's internal
-                        // default actions cover zoom, and a no-host Copy
-                        // would just write the engine selection to the
-                        // clipboard. Here we override Copy/Paste/Search so
-                        // the screen-level state (search-bar visibility,
-                        // selection-clear-on-paste) stays consistent.
-                        actions: <Type, Action<Intent>>{
-                          CopyIntent: CallbackAction<CopyIntent>(
-                            onInvoke: (_) {
-                              _copySelection();
-                              return null;
-                            },
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          if (_engine != null)
+                            TerminalView(
+                              _engine!,
+                              key: _viewKey,
+                              onViewportResize: _onViewportResize,
+                              controller: _controller,
+                              theme: _config.theme,
+                              textStyle: _config.style,
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: _config.window.padding.x,
+                                  vertical: _config.window.padding.y),
+                              focusNode: _focus,
+                              autofocus: true,
+                              cursorBlinkInterval: Duration(
+                                  milliseconds:
+                                      _config.cursor.blinkInterval),
+                              cursorBlinkTimeout: Duration(
+                                  seconds: _config.cursor.blinkTimeout),
+                              bellDuration: Duration(
+                                  milliseconds: _config.bell.duration),
+                              doubleClickThreshold: Duration(
+                                  milliseconds:
+                                      _config.mouse.doubleClickThreshold),
+                              scrollMultiplier: _config.scrolling.multiplier,
+                              preeditBg: _config.ime.preeditBg,
+                              preeditFg: _config.ime.preeditFg,
+                              preeditUnderline: _config.ime.underline,
+                              shortcuts: _binds.$1,
+                              actions: <Type, Action<Intent>>{
+                                CopyIntent: CallbackAction<CopyIntent>(
+                                  onInvoke: (_) {
+                                    _copySelection();
+                                    return null;
+                                  },
+                                ),
+                                PasteIntent: CallbackAction<PasteIntent>(
+                                  onInvoke: (_) => _paste(),
+                                ),
+                                ToggleSearchIntent:
+                                    CallbackAction<ToggleSearchIntent>(
+                                  onInvoke: (_) {
+                                    _toggleSearch();
+                                    return null;
+                                  },
+                                ),
+                              },
+                              onSecondaryTapUp: _onViewSecondaryTapUp,
+                              onLinkActivate: _onLinkActivate,
+                            ),
+                          if (_status != TermStatus.running)
+                            _buildRestartLayer(),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Offstage(
+                              offstage: !_searchOpen,
+                              child: ListenableBuilder(
+                                listenable: _controller,
+                                builder: (context, _) => TerminalSearchBar(
+                                  visible: _searchOpen,
+                                  invalidPattern: !_controller.searchValid,
+                                  onChanged: _searchChanged,
+                                  onNext: _controller.searchNext,
+                                  onPrev: _controller.searchPrev,
+                                  onClose: _closeSearch,
+                                ),
+                              ),
+                            ),
                           ),
-                          PasteIntent: CallbackAction<PasteIntent>(
-                            onInvoke: (_) => _paste(),
-                          ),
-                          ToggleSearchIntent:
-                              CallbackAction<ToggleSearchIntent>(
-                            onInvoke: (_) {
-                              _toggleSearch();
-                              return null;
-                            },
-                          ),
-                        },
-                        onSecondaryTapUp: _onViewSecondaryTapUp,
-                        onLinkActivate: _onLinkActivate,
-                      ),
-                    if (_status != TermStatus.running) _buildRestartLayer(),
-                    // Always mounted under Offstage so first-time costs (IME
-                    // attach on Linux, Material icon/font load) are paid at
-                    // app startup — opening search just toggles visibility.
-                    // ListenableBuilder watches the controller so the
-                    // `invalidPattern` indicator stays current even when a
-                    // controller mutation happens via Actions/Shortcuts
-                    // without an enclosing setState.
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: Offstage(
-                        offstage: !_searchOpen,
-                        child: ListenableBuilder(
-                          listenable: _controller,
-                          builder: (context, _) => TerminalSearchBar(
-                            visible: _searchOpen,
-                            invalidPattern: !_controller.searchValid,
-                            onChanged: _searchChanged,
-                            onNext: _controller.searchNext,
-                            onPrev: _controller.searchPrev,
-                            onClose: _closeSearch,
-                          ),
-                        ),
+                        ],
                       ),
                     ),
+                    if (_engine != null)
+                      TerminalHistoryScrollbar(
+                        engine: _engine!,
+                        controller: _controller,
+                        historyLines: _config.scrolling.history,
+                        viewportRows: rows,
+                        cellHeight: _metrics.height,
+                      ),
                   ],
                 ),
               ),
