@@ -379,6 +379,34 @@ Swapping in an SSH backend means returning bytes from the channel's stdout on
 `output` and writing to its stdin on `write` — the engine stays unchanged.
 See Plan 2S (TODO) for the upstream SSH/Mosh integration roadmap.
 
+## Scroll input architecture
+
+`TerminalView` routes all wheel / trackpad / touch-scroll gestures through an
+internal `TerminalScrollController` with a single pixel accumulator (Alacritty
+`scroll_terminal` parity):
+
+| Mode | Path |
+|------|------|
+| Normal scrollback | `engine.scrollByPixels` (local, sub-cell) |
+| Alt-screen + DEC 1007 (`kModeAlternateScroll`) | Batched SS3 arrow keys via `engine.scheduleWrite` |
+| Mouse-report (`:set mouse=a`) | Batched SGR wheel reports via `scheduleWrite` |
+| Shift + wheel (any mode) | Scrollback history (local) |
+
+Scrollback history negates wheel dy (`PointerScrollEvent.scrollDelta`) but not
+trackpad pan / touch drag dy — the platform uses opposite signs for the same
+user intent. TUI program scroll applies the same wheel-vs-pan split before
+line accumulation.
+
+TUI scroll is **line-discrete** at the PTY boundary (arrow keys / mouse wheel
+reports) — the same model as gnome-terminal/VTE and Alacritty. There is no
+local `scrollFraction` preview in alt-screen; only scrollback uses sub-cell
+pixels.
+
+`engine.scheduleWrite(bytes)` coalesces PTY-bound scroll bytes to one `output`
+event per microtask batch. TUI fling uses the same line accumulator.
+
+`scrollMultiplier` (default `3`) scales OS scroll deltas; `3` is neutral 1.0×.
+
 ## Reference example
 
 `lib/example/example_app.dart` (`ExampleTerminalApp`) wires every piece

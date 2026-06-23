@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert' show utf8;
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
@@ -30,6 +29,7 @@ import '../links/url_link_provider.dart';
 import '../render/cell_flags.dart';
 import '../render/cell_metrics.dart';
 import 'terminal_resize_controller.dart';
+import 'terminal_scroll_controller.dart';
 import 'viewport_geometry.dart';
 import '../render/glyph_atlas.dart';
 import '../render/glyph_cache.dart';
@@ -264,14 +264,7 @@ class TerminalViewState extends State<TerminalView>
   // is swallowed instead of reported to the program (which would otherwise see
   // a phantom click and open the link a second time externally).
   bool _linkActivatedOnDown = false;
-  double _touchScrollAccum = 0;
-  // Kinetic fling (touch + trackpad). Velocity in px/s, positive = scrolling up
-  // into history. Decays per GNOME Shell's swipeTracker model (decel^dt_ms) on a
-  // vsync Ticker so coast distance and smoothness match the desktop shell.
-  Ticker? _flingTicker;
-  double _flingVelocity = 0;
-  double _flingDecel = _kFlingDecelerationTouch;
-  Duration? _flingLastTick;
+  late TerminalScrollController _scrollController;
   // Trailing (timestamp, dy) samples for estimating trackpad release velocity,
   // since pan-zoom gestures carry no velocity of their own (unlike DragEnd).
   final List<(Duration, double)> _panSamples = [];
@@ -313,11 +306,17 @@ class TerminalViewState extends State<TerminalView>
   GlyphAtlas? get atlasForTest => _atlas;
 
   @visibleForTesting
-  bool get isFlingingForTest => _flingTicker != null;
+  bool get isFlingingForTest => _scrollController.isFlinging;
 
   @visibleForTesting
-  void startFlingForTest(double velocityPxPerSec) =>
-      _startFling(velocityPxPerSec);
+  void startFlingForTest(double velocityPxPerSec) {
+    _scrollController.startFling(
+      velocityPxPerSec: velocityPxPerSec,
+      deceleration: _kFlingDecelerationTouch,
+      shiftHeld: false,
+      createTicker: createTicker,
+    );
+  }
 
   @visibleForTesting
   TerminalResizeController get resizeControllerForTest => _resizeController;
@@ -338,6 +337,7 @@ class TerminalViewState extends State<TerminalView>
     _fontSize = widget.textStyle.size;
     _style = widget.textStyle.toTextStyle().copyWith(fontSize: _fontSize);
     _metrics = CellMetrics.measure(_style);
+    _scrollController = _newScrollController();
     widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
     _glyphs = _newGlyphCache();
     _bellCtrl = AnimationController(
@@ -395,8 +395,11 @@ class TerminalViewState extends State<TerminalView>
         _preedit = null;
       }
       // Reused view: a kinetic fling coasting at swap time would scroll the
-      // swapped-in engine. Stop it so the fling doesn't bleed across members/tabs.
-      _stopFling();
+      // swapped-in engine. Rebuild the scroll controller so PTY writes and
+      // history scroll target the swapped-in engine (same pattern as resize).
+      _scrollController.dispose();
+      _scrollController = _newScrollController();
+      _scrollController.onGestureStart();
       final seed = _resizeController.committed ?? _resizeController.current;
       _resizeController.dispose();
       _resizeController = TerminalResizeController(
@@ -446,6 +449,7 @@ class TerminalViewState extends State<TerminalView>
         _glyphs.dispose();
         _style = widget.textStyle.toTextStyle().copyWith(fontSize: _fontSize);
         _metrics = CellMetrics.measure(_style);
+        _scrollController.updateCellHeight(_metrics.height);
         widget.engine.setCellPixels(
             _metrics.width.round(), _metrics.height.round());
         _glyphs = _newGlyphCache();
@@ -515,9 +519,15 @@ class TerminalViewState extends State<TerminalView>
     _atlas = null;
   }
 
+  TerminalScrollController _newScrollController() => TerminalScrollController(
+        engine: widget.engine,
+        cellHeight: _metrics.height,
+        scrollMultiplier: widget.scrollMultiplier,
+      );
+
   @override
   void dispose() {
-    _stopFling();
+    _scrollController.dispose();
     _resizeController.dispose();
     _blinkTimer?.cancel();
     _blinkOn.dispose();
@@ -653,6 +663,7 @@ class TerminalViewState extends State<TerminalView>
       _glyphs.dispose();
       _style = widget.textStyle.toTextStyle().copyWith(fontSize: _fontSize);
       _metrics = CellMetrics.measure(_style);
+      _scrollController.updateCellHeight(_metrics.height);
       widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
       _glyphs = _newGlyphCache();
       _disposeAtlas(); // rebuilt lazily in build() with the new metrics
@@ -864,31 +875,35 @@ class TerminalViewState extends State<TerminalView>
             onPointerUp: _onPointerUp,
             onPointerSignal: _onPointerSignal,
             onPointerPanZoomStart: (_) {
-              _stopFling();
-              _touchScrollAccum = 0;
+              _scrollController.onGestureStart();
               _panSamples.clear();
             },
             onPointerPanZoomUpdate: (e) {
               _recordPanSample(e.timeStamp, e.localPanDelta.dy);
-              _touchScrollBy(e.localPanDelta.dy);
+              _scrollController.onPanDelta(
+                dyPx: e.localPanDelta.dy,
+                shiftHeld: HardwareKeyboard.instance.isShiftPressed,
+              );
             },
-            // Trackpad gestures carry no release velocity, so coast from the
-            // windowed pan velocity using the touchpad deceleration.
             onPointerPanZoomEnd: (_) {
-              _startFling(_panReleaseVelocity(),
-                  decel: _kFlingDecelerationTouchpad);
+              _scrollController.startFling(
+                velocityPxPerSec: _panReleaseVelocity(),
+                deceleration: _kFlingDecelerationTouchpad,
+                shiftHeld: HardwareKeyboard.instance.isShiftPressed,
+                createTicker: createTicker,
+              );
               _panSamples.clear();
             },
             child: GestureDetector(
               supportedDevices: const {PointerDeviceKind.touch},
               behavior: HitTestBehavior.translucent,
-              onTapDown: (_) => _stopFling(),
+              onTapDown: (_) => _scrollController.stopFling(),
               onTap: _onTouchTap,
-              onVerticalDragStart: (_) {
-                _stopFling();
-                _touchScrollAccum = 0;
-              },
-              onVerticalDragUpdate: (e) => _touchScrollBy(e.delta.dy),
+              onVerticalDragStart: (_) => _scrollController.onGestureStart(),
+              onVerticalDragUpdate: (e) => _scrollController.onPanDelta(
+                dyPx: e.delta.dy,
+                shiftHeld: HardwareKeyboard.instance.isShiftPressed,
+              ),
               onVerticalDragEnd: _onVerticalDragEnd,
               onLongPressStart: _onLongPressStart,
               onLongPressMoveUpdate: _onLongPressMoveUpdate,

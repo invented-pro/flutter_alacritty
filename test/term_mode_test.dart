@@ -12,5 +12,7 @@ void main() {
     expect(anyMouse(kModeMouseDrag), isTrue);
     expect(anyMouse(kModeMouseMotion), isTrue);
     expect(anyMouse(0), isFalse);
+    expect(alternateScroll(kModeAlternateScroll), isTrue);
+    expect(alternateScroll(0), isFalse);
   });
 }

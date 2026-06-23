@@ -90,7 +90,7 @@ class TerminalEngine {
   final MirrorGrid _grid;
 
   final StreamController<Uint8List> _outputCtl =
-      StreamController<Uint8List>.broadcast();
+      StreamController<Uint8List>.broadcast(sync: true);
   final StreamController<void> _bellCtl = StreamController<void>.broadcast();
   final StreamController<String> _clipboardCtl =
       StreamController<String>.broadcast();
@@ -216,6 +216,86 @@ class TerminalEngine {
     _outputCtl.add(bytes);
   }
 
+  final BytesBuilder _pendingWrite = BytesBuilder(copy: false);
+  bool _writeFlushScheduled = false;
+  void Function(void Function())? _injectSchedule;
+
+  /// Coalesce PTY-bound bytes (TUI scroll, batched arrows) to one [output]
+  /// event per scheduling tick — same hop model as scroll coalescing.
+  void scheduleWrite(Uint8List bytes) {
+    if (_disposed || _outputCtl.isClosed || bytes.isEmpty) return;
+    _pendingWrite.add(bytes);
+    if (_writeFlushScheduled) return;
+    _writeFlushScheduled = true;
+    _schedule(_flushPendingWrite);
+  }
+
+  void _flushPendingWrite() {
+    _writeFlushScheduled = false;
+    if (_pendingWrite.isEmpty) return;
+    write(_pendingWrite.toBytes());
+    _pendingWrite.clear();
+  }
+
+  static final List<void Function()> _microtaskBatch = [];
+  static bool _microtaskArmed = false;
+
+  /// Coalesce input-side work within the current event-loop turn.
+  static void _defaultSchedule(void Function() cb) {
+    _microtaskBatch.add(cb);
+    if (_microtaskArmed) return;
+    _microtaskArmed = true;
+    scheduleMicrotask(() {
+      _microtaskArmed = false;
+      final batch = List<void Function()>.from(_microtaskBatch);
+      _microtaskBatch.clear();
+      for (final task in batch) {
+        task();
+      }
+    });
+  }
+
+  void Function(void Function()) get _schedule =>
+      _injectSchedule ?? _defaultSchedule;
+
+  final List<void Function()> _pendingTasks = [];
+  bool _taskFlushScheduled = false;
+
+  /// Microtask-batched scheduling shared by scroll coalescing and [scheduleWrite].
+  void scheduleTask(void Function() cb) {
+    _pendingTasks.add(cb);
+    if (_taskFlushScheduled) return;
+    _taskFlushScheduled = true;
+    _schedule(_flushPendingTasks);
+  }
+
+  void _flushPendingTasks() {
+    _taskFlushScheduled = false;
+    final tasks = List<void Function()>.from(_pendingTasks);
+    _pendingTasks.clear();
+    for (final t in tasks) {
+      t();
+    }
+  }
+
+  /// Sync-flush coalesced tasks and writes before [dispose] so engine swap /
+  /// teardown does not drop batched TUI scroll bytes.
+  void _drainPending() {
+    _taskFlushScheduled = false;
+    while (_pendingTasks.isNotEmpty) {
+      final tasks = List<void Function()>.from(_pendingTasks);
+      _pendingTasks.clear();
+      for (final t in tasks) {
+        t();
+      }
+    }
+    _writeFlushScheduled = false;
+    if (_pendingWrite.isNotEmpty) {
+      write(_pendingWrite.toBytes());
+      _pendingWrite.clear();
+    }
+  }
+
   /// URL-launcher helper: returns the hyperlink URI at (row, col), or null.
   String? hyperlinkAt(int row, int col) {
     if (_client == null) return null;
@@ -322,8 +402,12 @@ class TerminalEngine {
     await _client?.drainForTest();
   }
 
+  @visibleForTesting
+  int get pendingWriteBytesForTest => _pendingWrite.length;
+
   void dispose() {
     if (_disposed) return;
+    _drainPending();
     _disposed = true;
     _client?.dispose();
     _grid.dispose();
@@ -365,6 +449,7 @@ class TerminalEngine {
   /// Also rewires a `FakeBinding`-style binding whose `on*` hooks are
   /// settable, so widget tests can drive engine events via `pumpEvents`.
   void _bindEager(EngineBinding binding, {void Function(void Function())? schedule}) {
+    _injectSchedule = schedule;
     _binding = binding;
     _client = TerminalEngineClient(
       binding: binding,
