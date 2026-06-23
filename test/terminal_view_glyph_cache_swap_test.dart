@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/terminal_engine.dart';
+import 'package:flutter_alacritty/render/glyph_atlas.dart';
 import 'package:flutter_alacritty/ui/terminal_view.dart';
 
 import 'fake_binding.dart';
@@ -54,12 +55,12 @@ void main() {
     );
     await g.up();
     await tester.pump();
+    await tester.pump();
 
     final stateBefore = tester.state<TerminalViewState>(find.byType(TerminalView));
-    final cacheBefore = stateBefore.glyphCacheForTest;
-    final lenBefore = cacheBefore.length;
-    expect(lenBefore, greaterThan(0),
-        reason: 'painting row-0 text should populate the glyph cache');
+    final atlasBefore = stateBefore.atlasForTest;
+    expect(atlasBefore?.image, isNotNull,
+        reason: 'painting row-0 text should build the glyph atlas');
 
     // SWAP the engine — the host changes only the engine prop on the same view.
     engineNotifier.value = engine2;
@@ -68,10 +69,11 @@ void main() {
     final stateAfter = tester.state<TerminalViewState>(find.byType(TerminalView));
     expect(identical(stateAfter, stateBefore), isTrue,
         reason: 'engine swap must reuse the State (no remount)');
-    expect(identical(stateAfter.glyphCacheForTest, cacheBefore), isTrue,
-        reason: 'engine swap must NOT rebuild the GlyphCache — this warm cache '
+    expect(identical(stateAfter.atlasForTest, atlasBefore), isTrue,
+        reason: 'engine swap must NOT rebuild the GlyphAtlas — this warm atlas '
             'is what prevents partial-text on member/tab switch');
-    expect(stateAfter.glyphCacheForTest.length, greaterThanOrEqualTo(lenBefore),
-        reason: 'previously rasterized glyphs must still be cached after swap');
+    expect(stateAfter.atlasForTest?.generation,
+        greaterThanOrEqualTo(atlasBefore!.generation),
+        reason: 'previously rasterized glyphs must still be atlased after swap');
   });
 }

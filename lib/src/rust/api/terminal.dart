@@ -54,7 +54,7 @@ void engineResize({
   rows: rows,
 );
 
-Future<void> engineScrollLines({
+Future<RenderUpdate> engineScrollLines({
   required TerminalEngine engine,
   required int delta,
 }) => RustLib.instance.api.crateApiTerminalEngineScrollLines(
@@ -63,7 +63,7 @@ Future<void> engineScrollLines({
 );
 
 /// Sub-cell pixel scroll. Positive `delta_px` scrolls up into history.
-Future<void> engineScrollPixels({
+Future<RenderUpdate> engineScrollPixels({
   required TerminalEngine engine,
   required double deltaPx,
 }) => RustLib.instance.api.crateApiTerminalEngineScrollPixels(
@@ -71,7 +71,7 @@ Future<void> engineScrollPixels({
   deltaPx: deltaPx,
 );
 
-Future<void> engineScrollToBottom({required TerminalEngine engine}) =>
+Future<RenderUpdate> engineScrollToBottom({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineScrollToBottom(engine: engine);
 
 void engineClearHistory({required TerminalEngine engine}) =>
@@ -125,6 +125,9 @@ bool engineSearchPrev({required TerminalEngine engine}) =>
 
 void engineSearchClear({required TerminalEngine engine}) =>
     RustLib.instance.api.crateApiTerminalEngineSearchClear(engine: engine);
+
+bool engineSearchIsActive({required TerminalEngine engine}) =>
+    RustLib.instance.api.crateApiTerminalEngineSearchIsActive(engine: engine);
 
 String? engineResolveHyperlink({
   required TerminalEngine engine,

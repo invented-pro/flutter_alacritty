@@ -28,6 +28,9 @@ class FakeBinding implements RewireableEngineBinding {
   final Map<(int, int), int> hyperlinkAt = {};
   final Map<int, String> hyperlinkUris = {};
 
+  /// Simulated scrollback offset for widget tests that drive [scrollLines].
+  int displayOffsetSim = 0;
+
   /// Events the next [pumpEvents] should dispatch. Each entry is one of:
   ///   `('pty', Uint8List)`, `('title', String)`, `('reset_title', null)`,
   ///   `('bell', null)`, `('clipboard', String)`.
@@ -51,6 +54,7 @@ class FakeBinding implements RewireableEngineBinding {
         cursorCol: 0,
         cursorVisible: true,
         modeFlags: modeFlags,
+        displayOffset: displayOffsetSim,
       );
 
   GridUpdate _hyperlinkSnapshot() {
@@ -88,6 +92,7 @@ class FakeBinding implements RewireableEngineBinding {
       cursorCol: 0,
       cursorVisible: false,
       modeFlags: modeFlags,
+      displayOffset: displayOffsetSim,
     );
   }
 
@@ -131,7 +136,10 @@ class FakeBinding implements RewireableEngineBinding {
   @override
   Future<GridUpdate> takeDamage() async => _blank();
   @override
-  GridUpdate fullSnapshot() => _blank();
+  GridUpdate fullSnapshot() {
+    fullSnapshotCalls++;
+    return _hyperlinkSnapshot();
+  }
   @override
   void pumpEvents() {
     if (pendingEvents.isEmpty) return;
@@ -169,17 +177,33 @@ class FakeBinding implements RewireableEngineBinding {
     lastResizeRows = rows;
   }
   @override
-  Future<void> scrollLines(int delta) async {
+  Future<GridUpdate> scrollLines(int delta) async {
     scrollCalls++;
     scrollLinesArgs.add(delta);
+    displayOffsetSim = (displayOffsetSim + delta).clamp(0, 100000);
+    final snap = fullSnapshot();
+    return GridUpdate(
+      full: snap.full,
+      rows: snap.rows,
+      columns: snap.columns,
+      lines: snap.lines,
+      cursorRow: snap.cursorRow,
+      cursorCol: snap.cursorCol,
+      cursorVisible: snap.cursorVisible,
+      modeFlags: snap.modeFlags,
+      displayOffset: displayOffsetSim,
+      scrollLineDelta: 0,
+    );
   }
   @override
-  Future<void> scrollPixels(double deltaPx) async {
+  Future<GridUpdate> scrollPixels(double deltaPx) async {
     scrollPixelsArgs.add(deltaPx);
+    return _blank();
   }
   @override
-  Future<void> scrollToBottom() async {
+  Future<GridUpdate> scrollToBottom() async {
     scrollToBottomCalls++;
+    return _blank();
   }
   @override
   void clearHistory() {}
@@ -211,10 +235,9 @@ class FakeBinding implements RewireableEngineBinding {
   @override
   void searchClear() {}
   @override
-  GridUpdate fullSnapshotSearched() {
-    fullSnapshotCalls++;
-    return _hyperlinkSnapshot();
-  }
+  bool searchIsActive() => false;
+  @override
+  GridUpdate fullSnapshotSearched() => fullSnapshot();
   @override
   String? resolveHyperlink(int id) => hyperlinkUris[id];
   @override
@@ -261,8 +284,12 @@ class TextFakeBinding extends FakeBinding {
       cursorCol: 0,
       cursorVisible: false,
       modeFlags: modeFlags,
+      displayOffset: displayOffsetSim,
     );
   }
+
+  @override
+  GridUpdate fullSnapshot() => _textSnapshot();
 
   @override
   GridUpdate fullSnapshotSearched() => _textSnapshot();

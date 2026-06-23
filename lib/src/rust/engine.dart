@@ -117,6 +117,12 @@ class RenderUpdate {
   /// a full update). 0.0 when sitting on a line boundary.
   final double scrollFraction;
 
+  /// Net viewport line scroll since the last mirror state. Positive = scrolled
+  /// up into history. Zero on full updates and on sub-cell-only pixel scrolls.
+  /// The Dart mirror rotates existing rows by this delta before applying
+  /// [lines], so scroll refresh only ships the edge rows that entered view.
+  final int scrollLineDelta;
+
   const RenderUpdate({
     required this.lines,
     required this.full,
@@ -131,6 +137,7 @@ class RenderUpdate {
     required this.defaultBg,
     required this.cursorColor,
     required this.scrollFraction,
+    required this.scrollLineDelta,
   });
 
   @override
@@ -147,7 +154,8 @@ class RenderUpdate {
       defaultFg.hashCode ^
       defaultBg.hashCode ^
       cursorColor.hashCode ^
-      scrollFraction.hashCode;
+      scrollFraction.hashCode ^
+      scrollLineDelta.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -166,5 +174,6 @@ class RenderUpdate {
           defaultFg == other.defaultFg &&
           defaultBg == other.defaultBg &&
           cursorColor == other.cursorColor &&
-          scrollFraction == other.scrollFraction;
+          scrollFraction == other.scrollFraction &&
+          scrollLineDelta == other.scrollLineDelta;
 }

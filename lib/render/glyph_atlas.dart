@@ -112,6 +112,13 @@ class GlyphAtlas {
 
   bool get hasPending => _pending.isNotEmpty;
 
+  /// Queue printable ASCII so the first paint frame can atlas common glyphs.
+  void prewarmAscii() {
+    for (var cp = 0x20; cp <= 0x7E; cp++) {
+      request(keyFor(cp));
+    }
+  }
+
   // --- Per-frame batch API -------------------------------------------------
   // The painter calls beginBatch once, addSprite per glyph that [has] a slot,
   // then drawBatch to emit the whole frame's glyphs in one drawRawAtlas.
@@ -168,18 +175,29 @@ class GlyphAtlas {
   /// the (possibly taller) new image and only the newly-assigned glyphs are
   /// rasterized — so a rebuild is O(new glyphs), not O(all). Returns true if a
   /// rebuild happened (painter should repaint).
-  bool rebuildIfNeeded() {
+  ///
+  /// [maxNewGlyphs] caps how many pending glyphs are rasterized per call so a
+  /// unicode flood cannot stall the UI thread in one `toImageSync`.
+  bool rebuildIfNeeded({int maxNewGlyphs = 512}) {
     if (_pending.isEmpty) return false;
     // Assign slots to the pending keys after the existing ones (cap already
     // enforced in `request`, so this never exceeds [_maxSlots]).
     final newKeys = <int>[];
-    for (final k in _pending) {
-      if (!_slotIndex.containsKey(k)) {
-        _slotIndex[k] = _slotIndex.length;
-        newKeys.add(k);
+    for (final k in _pending.toList()) {
+      if (_slotIndex.containsKey(k)) {
+        _pending.remove(k);
+        continue;
       }
+      if (_slotIndex.length >= _maxSlots) {
+        break;
+      }
+      if (newKeys.length >= maxNewGlyphs) {
+        break;
+      }
+      _slotIndex[k] = _slotIndex.length;
+      newKeys.add(k);
+      _pending.remove(k);
     }
-    _pending.clear();
     if (newKeys.isEmpty) return false;
 
     final rows = (_slotIndex.length / columns).ceil();

@@ -47,6 +47,7 @@ class GridUpdate {
     this.cursorColor = 0xFF000000,
     this.scrollFraction = 0.0,
     this.overscan,
+    this.scrollLineDelta = 0,
   });
   final bool full;
   final int rows;
@@ -70,6 +71,10 @@ class GridUpdate {
   /// when [scrollFraction] > 0. Present only on full updates (null on partial
   /// damage, where the fraction is always 0).
   final LineCells? overscan;
+
+  /// Net viewport line scroll for incremental scroll refresh. The mirror rotates
+  /// existing rows by this delta before applying [lines].
+  final int scrollLineDelta;
 }
 
 /// Read-only view of the terminal grid that the engine exposes to consumers.
@@ -235,8 +240,16 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
     if (u.full) {
       _ensureSize(u.rows, u.columns);
     }
+    final delta = u.scrollLineDelta;
+    if (delta != 0 && _rows > 0) {
+      _rotateRows(delta);
+    }
     for (final l in u.lines) {
-      if (l.line < 0 || l.line >= _rows) continue;
+      if (l.line < 0) continue;
+      if (l.line >= _rows) {
+        _applyOverscanLine(l);
+        continue;
+      }
       // Partial damage can arrive with engine cols > mirror cols when resize races
       // the async drain (LayoutBuilder grew before post-frame resize ran).
       final copy = l.codepoints.length < _columns ? l.codepoints.length : _columns;
@@ -247,24 +260,10 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
       _flags[l.line].setRange(0, copy, l.flags);
       _hyperlinkId[l.line].setRange(0, copy, l.hyperlinkId);
     }
-    // Overscan row only arrives on full updates; partial damage always carries
-    // scrollFraction 0 (engine forces a full snapshot whenever it's non-zero),
-    // so the row-(-1) data the painter reads is never stale while visible.
+    // Overscan from explicit field (full updates) or sentinel line index (scroll).
     final o = u.overscan;
     if (o != null) {
-      final copy = o.codepoints.length < _columns ? o.codepoints.length : _columns;
-      _overCodepoints.fillRange(0, _columns, 32);
-      _overFg.fillRange(0, _columns, _defaultFg);
-      _overBg.fillRange(0, _columns, _defaultBg);
-      _overFlags.fillRange(0, _columns, 0);
-      _overHyperlinkId.fillRange(0, _columns, 0);
-      if (copy > 0) {
-        _overCodepoints.setRange(0, copy, o.codepoints);
-        _overFg.setRange(0, copy, o.fg);
-        _overBg.setRange(0, copy, o.bg);
-        _overFlags.setRange(0, copy, o.flags);
-        _overHyperlinkId.setRange(0, copy, o.hyperlinkId);
-      }
+      _applyOverscanLine(o);
     }
     _scrollFraction = u.scrollFraction;
     _cursorRow = u.cursorRow;
@@ -276,5 +275,43 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
     _displayOffset = u.displayOffset;
     _generation++;
     notifyListeners();
+  }
+
+  void _rotateRows(int delta) {
+    if (delta > 0) {
+      final d = delta > _rows ? _rows : delta;
+      for (var i = _rows - 1; i >= d; i--) {
+        _copyRow(i - d, i);
+      }
+    } else if (delta < 0) {
+      final d = (-delta) > _rows ? _rows : -delta;
+      for (var i = 0; i < _rows - d; i++) {
+        _copyRow(i + d, i);
+      }
+    }
+  }
+
+  void _copyRow(int from, int to) {
+    _codepoints[to].setAll(0, _codepoints[from]);
+    _fg[to].setAll(0, _fg[from]);
+    _bg[to].setAll(0, _bg[from]);
+    _flags[to].setAll(0, _flags[from]);
+    _hyperlinkId[to].setAll(0, _hyperlinkId[from]);
+  }
+
+  void _applyOverscanLine(LineCells o) {
+    final copy = o.codepoints.length < _columns ? o.codepoints.length : _columns;
+    _overCodepoints.fillRange(0, _columns, 32);
+    _overFg.fillRange(0, _columns, _defaultFg);
+    _overBg.fillRange(0, _columns, _defaultBg);
+    _overFlags.fillRange(0, _columns, 0);
+    _overHyperlinkId.fillRange(0, _columns, 0);
+    if (copy > 0) {
+      _overCodepoints.setRange(0, copy, o.codepoints);
+      _overFg.setRange(0, copy, o.fg);
+      _overBg.setRange(0, copy, o.bg);
+      _overFlags.setRange(0, copy, o.flags);
+      _overHyperlinkId.setRange(0, copy, o.hyperlinkId);
+    }
   }
 }

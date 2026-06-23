@@ -124,7 +124,7 @@ jobs:
         working-directory: packages/rust_lib_flutter_alacritty/rust
 
       - name: Rendering + engine benchmarks
-        run: flutter test --tags benchmark test/rendering_benchmark_test.dart test/engine_benchmark_test.dart
+        run: flutter test --tags benchmark test/rendering_benchmark_test.dart test/engine_benchmark_test.dart test/scroll_benchmark_test.dart
 
   package-linux:
     name: Package Linux (deb + AppImage)

@@ -10,7 +10,7 @@ import 'package:flutter_alacritty/src/rust/engine.dart';
 class _CountingFakeBinding implements EngineBinding {
   int scrollLinesCalls = 0;
   final List<int> scrollLinesArgs = [];
-  int snapshotCalls = 0;
+  int scrollApplyCalls = 0;
 
   GridUpdate _empty() => GridUpdate(
         full: true,
@@ -23,25 +23,31 @@ class _CountingFakeBinding implements EngineBinding {
       );
 
   @override
-  Future<void> scrollLines(int delta) async {
+  Future<GridUpdate> scrollLines(int delta) async {
     scrollLinesCalls++;
     scrollLinesArgs.add(delta);
+    scrollApplyCalls++;
+    return _empty();
   }
 
   int scrollPixelsCalls = 0;
   final List<double> scrollPixelsArgs = [];
 
   @override
-  Future<void> scrollPixels(double deltaPx) async {
+  Future<GridUpdate> scrollPixels(double deltaPx) async {
     scrollPixelsCalls++;
     scrollPixelsArgs.add(deltaPx);
+    scrollApplyCalls++;
+    return _empty();
   }
 
   @override
   GridUpdate fullSnapshotSearched() {
-    snapshotCalls++;
     return _empty();
   }
+
+  @override
+  bool searchIsActive() => false;
 
   @override
   GridUpdate fullSnapshot() => _empty();
@@ -56,7 +62,7 @@ class _CountingFakeBinding implements EngineBinding {
   @override
   void resize(int columns, int rows) {}
   @override
-  Future<void> scrollToBottom() async {}
+  Future<GridUpdate> scrollToBottom() async => _empty();
   @override
   void clearHistory() {}
   @override
@@ -107,14 +113,14 @@ void main() {
     client.scheduleScrollBy(3);
     client.scheduleScrollBy(-1);
     expect(binding.scrollLinesCalls, 0);
-    expect(binding.snapshotCalls, 0);
+    expect(binding.scrollApplyCalls, 0);
 
     pending();
     await Future<void>.value();
 
     expect(binding.scrollLinesCalls, 1);
     expect(binding.scrollLinesArgs.single, 5);
-    expect(binding.snapshotCalls, 1);
+    expect(binding.scrollApplyCalls, 1);
   });
 
   test('multiple scheduleScrollByPixels in one tick → 1 FFI scrollPixels',
@@ -138,7 +144,7 @@ void main() {
 
     expect(binding.scrollPixelsCalls, 1);
     expect(binding.scrollPixelsArgs.single, closeTo(6.0, 1e-9));
-    expect(binding.snapshotCalls, 1);
+    expect(binding.scrollApplyCalls, 1);
   });
 
   test('coalesced delta sums linearly before engine clamp', () async {
@@ -179,7 +185,7 @@ void main() {
 
     expect(binding.scrollLinesCalls, 2);
     expect(binding.scrollLinesArgs, [2, 4]);
-    expect(binding.snapshotCalls, 2);
+    expect(binding.scrollApplyCalls, 2);
   });
 
   test('scheduleScrollBy during in-flight flush schedules a second batch',
@@ -203,7 +209,7 @@ void main() {
     await Future<void>.value();
 
     expect(binding.scrollLinesArgs, [3, 5]);
-    expect(binding.snapshotCalls, 2);
+    expect(binding.scrollApplyCalls, 2);
   });
 
   test('a callback firing mid-flush re-arms instead of stranding the delta',
@@ -244,7 +250,7 @@ void main() {
     await Future<void>.value();
 
     expect(binding.scrollLinesArgs, [3, 5]);
-    expect(binding.snapshotCalls, 2);
+    expect(binding.scrollApplyCalls, 2);
   });
 
   test('pending scroll applies before drain ingests PTY output', () async {
@@ -288,7 +294,7 @@ void main() {
     await Future<void>.value();
 
     expect(binding.scrollLinesCalls, 0);
-    expect(binding.snapshotCalls, 0);
+    expect(binding.scrollApplyCalls, 0);
   });
 }
 
@@ -297,10 +303,22 @@ class _ScrollOffsetFakeBinding extends _CountingFakeBinding {
   int displayOffset = 10;
 
   @override
-  Future<void> scrollLines(int delta) async {
-    await super.scrollLines(delta);
+  Future<GridUpdate> scrollLines(int delta) async {
+    scrollLinesCalls++;
+    scrollLinesArgs.add(delta);
     displayOffset =
         (displayOffset + delta).clamp(0, 100);
+    scrollApplyCalls++;
+    return GridUpdate(
+      full: false,
+      rows: 0,
+      columns: 0,
+      lines: const [],
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: false,
+      displayOffset: displayOffset,
+    );
   }
 
   @override
@@ -313,7 +331,6 @@ class _ScrollOffsetFakeBinding extends _CountingFakeBinding {
 
   @override
   GridUpdate fullSnapshotSearched() {
-    snapshotCalls++;
     final u = super.fullSnapshotSearched();
     return GridUpdate(
       full: u.full,
@@ -329,18 +346,19 @@ class _ScrollOffsetFakeBinding extends _CountingFakeBinding {
 }
 
 class _DeferredScrollBinding extends _CountingFakeBinding {
-  Completer<void>? _scrollCompleter;
+  Completer<GridUpdate>? _scrollCompleter;
 
   @override
-  Future<void> scrollLines(int delta) {
+  Future<GridUpdate> scrollLines(int delta) {
     scrollLinesCalls++;
     scrollLinesArgs.add(delta);
-    _scrollCompleter = Completer<void>();
+    _scrollCompleter = Completer<GridUpdate>();
     return _scrollCompleter!.future;
   }
 
   void completeScroll() {
-    _scrollCompleter?.complete();
+    scrollApplyCalls++;
+    _scrollCompleter?.complete(_empty());
     _scrollCompleter = null;
   }
 }

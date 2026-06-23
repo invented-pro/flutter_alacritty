@@ -53,11 +53,13 @@ class _SearchFake implements EngineBinding {
   @override
   void resize(int c, int r) {}
   @override
-  Future<void> scrollLines(int d) async {}
+  bool searchIsActive() => lastSet != null && !cleared;
   @override
-  Future<void> scrollPixels(double d) async {}
+  Future<GridUpdate> scrollLines(int d) async => _empty();
   @override
-  Future<void> scrollToBottom() async {}
+  Future<GridUpdate> scrollPixels(double d) async => _empty();
+  @override
+  Future<GridUpdate> scrollToBottom() async => _empty();
   @override
   void clearHistory() {}
   @override
@@ -111,11 +113,13 @@ class _SlowFakeBinding implements EngineBinding {
   @override
   GridUpdate fullSnapshotSearched() => _empty();
   @override
-  Future<void> scrollLines(int delta) async {}
+  bool searchIsActive() => false;
   @override
-  Future<void> scrollPixels(double deltaPx) async {}
+  Future<GridUpdate> scrollLines(int delta) async => _empty();
   @override
-  Future<void> scrollToBottom() async {}
+  Future<GridUpdate> scrollPixels(double deltaPx) async => _empty();
+  @override
+  Future<GridUpdate> scrollToBottom() async => _empty();
   @override
   void clearHistory() {}
   @override
@@ -185,11 +189,13 @@ class _FakeBinding implements EngineBinding {
         cursorVisible: true,
       );
   @override
-  Future<void> scrollLines(int delta) async {}
+  bool searchIsActive() => false;
   @override
-  Future<void> scrollPixels(double deltaPx) async {}
+  Future<GridUpdate> scrollLines(int delta) async => fullSnapshot();
   @override
-  Future<void> scrollToBottom() async {}
+  Future<GridUpdate> scrollPixels(double deltaPx) async => fullSnapshot();
+  @override
+  Future<GridUpdate> scrollToBottom() async => fullSnapshot();
   @override
   void clearHistory() {}
   @override

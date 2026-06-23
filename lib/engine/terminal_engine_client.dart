@@ -48,7 +48,10 @@ class TerminalEngineClient {
   /// match highlights stuck or absent).
   void refreshView() {
     if (_disposed) return;
-    _grid.apply(_binding.fullSnapshotSearched());
+    final update = _binding.searchIsActive()
+        ? _binding.fullSnapshotSearched()
+        : _binding.fullSnapshot();
+    _grid.apply(update);
     SchedulerBinding.instance.scheduleFrame();
   }
 
@@ -150,8 +153,7 @@ class TerminalEngineClient {
   }
 
   Future<void> scrollLines(int delta) async {
-    await _binding.scrollLines(delta);
-    refreshView();
+    _applyScrollUpdate(await _binding.scrollLines(delta));
   }
 
   /// Coalesced scroll. Multiple calls within one scheduling tick aggregate
@@ -211,9 +213,12 @@ class TerminalEngineClient {
       // fraction), then the pixel delta rebuilds the fraction on top — so a
       // pixel scroll coalesced with a line scroll in the same frame still lands
       // at the right sub-cell offset rather than being snapped away after.
-      if (delta != 0) await _binding.scrollLines(delta);
-      if (pixels != 0) await _binding.scrollPixels(pixels);
-      if (!_disposed) refreshView();
+      if (delta != 0) {
+        _applyScrollUpdate(await _binding.scrollLines(delta));
+      }
+      if (!_disposed && pixels != 0) {
+        _applyScrollUpdate(await _binding.scrollPixels(pixels));
+      }
     } finally {
       _scrollApplying = false;
       _ensureScrollScheduled();
@@ -221,8 +226,13 @@ class TerminalEngineClient {
   }
 
   Future<void> scrollToBottom() async {
-    await _binding.scrollToBottom();
-    refreshView();
+    _applyScrollUpdate(await _binding.scrollToBottom());
+  }
+
+  void _applyScrollUpdate(GridUpdate update) {
+    if (_disposed) return;
+    _grid.apply(update);
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   void clearHistory() {

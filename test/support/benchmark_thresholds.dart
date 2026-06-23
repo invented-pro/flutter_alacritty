@@ -35,3 +35,20 @@ const int kEngineWarmupRuns = 1;
 
 /// Timed iterations per engine fixture; median is checked against ceilings.
 const int kEngineTimedRuns = 3;
+
+// ── Scroll refresh vs full snapshot (80×24, scrolled into history) ─────────
+
+/// Median `engineFullSnapshot` after scrolling into history.
+const int kScrollFullSnapshotMaxUs = 8_000;
+
+/// Median `engineScrollLines(1)` incremental refresh at the same offset.
+const int kScrollRefreshMaxUs = 3_000;
+
+/// Incremental scroll must ship far fewer cells than a full viewport repack.
+const int kScrollRefreshMaxCells = 200;
+
+/// Full snapshot ships the whole viewport (+ overscan on `full: true`).
+const int kScrollFullSnapshotMinCells = 80 * 24;
+
+/// scroll_refresh median must stay below this fraction of full_snapshot median.
+const double kScrollRefreshVsFullSnapshotMaxRatio = 0.55;

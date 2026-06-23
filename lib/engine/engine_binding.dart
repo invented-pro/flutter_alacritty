@@ -22,10 +22,11 @@ abstract class EngineBinding {
   GridUpdate fullSnapshot();
   /// Full viewport snapshot with search match flags applied.
   GridUpdate fullSnapshotSearched();
-  Future<void> scrollLines(int delta);
+  bool searchIsActive();
+  Future<GridUpdate> scrollLines(int delta);
   /// Sub-cell pixel scroll. Positive [deltaPx] scrolls up into history.
-  Future<void> scrollPixels(double deltaPx);
-  Future<void> scrollToBottom();
+  Future<GridUpdate> scrollPixels(double deltaPx);
+  Future<GridUpdate> scrollToBottom();
   void clearHistory();
   void reconfigure(EngineConfig config);
   void respondClipboardLoad(String text);
@@ -131,19 +132,23 @@ class FrbEngineBinding implements EngineBinding {
       _toGridUpdate(engineFullSnapshotSearched(engine: _engine));
 
   @override
+  bool searchIsActive() => engineSearchIsActive(engine: _engine);
+
+  @override
   void resize(int columns, int rows) =>
       engineResize(engine: _engine, columns: columns, rows: rows);
 
   @override
-  Future<void> scrollLines(int delta) =>
-      engineScrollLines(engine: _engine, delta: delta);
+  Future<GridUpdate> scrollLines(int delta) async =>
+      _toGridUpdate(await engineScrollLines(engine: _engine, delta: delta));
 
   @override
-  Future<void> scrollPixels(double deltaPx) =>
-      engineScrollPixels(engine: _engine, deltaPx: deltaPx);
+  Future<GridUpdate> scrollPixels(double deltaPx) async =>
+      _toGridUpdate(await engineScrollPixels(engine: _engine, deltaPx: deltaPx));
 
   @override
-  Future<void> scrollToBottom() => engineScrollToBottom(engine: _engine);
+  Future<GridUpdate> scrollToBottom() async =>
+      _toGridUpdate(await engineScrollToBottom(engine: _engine));
 
   @override
   void clearHistory() => engineClearHistory(engine: _engine);
@@ -199,13 +204,23 @@ class FrbEngineBinding implements EngineBinding {
 
   GridUpdate _toGridUpdate(RenderUpdate u) {
     // A full update appends one trailing overscan row (the line just above the
-    // viewport top) after the screen_lines viewport rows; partial damage has no
-    // overscan. Split it off so the viewport stays exactly screen_lines tall.
+    // viewport top) after the screen_lines viewport rows. Incremental scroll
+    // refreshes tag overscan with [OVERSCAN_LINE_TAG] instead.
+    const overscanTag = 0xFFFFFFFF;
     final hasOverscan = u.full && u.lines.isNotEmpty;
     final viewportCount = hasOverscan ? u.lines.length - 1 : u.lines.length;
-    final viewport = <LineCells>[
-      for (var i = 0; i < viewportCount; i++) _lineCells(u.lines[i]),
-    ];
+    final viewport = <LineCells>[];
+    LineCells? overscan;
+    for (final l in u.lines) {
+      if (u.full) {
+        if (l.line < viewportCount) viewport.add(_lineCells(l));
+      } else if (l.line == overscanTag) {
+        overscan = _lineCells(l);
+      } else {
+        viewport.add(_lineCells(l));
+      }
+    }
+    if (hasOverscan) overscan = _lineCells(u.lines.last);
     return GridUpdate(
       full: u.full,
       // rows/columns only matter on a full update (MirrorGrid.apply resizes
@@ -224,7 +239,8 @@ class FrbEngineBinding implements EngineBinding {
       cursorColor: u.cursorColor,
       lines: viewport,
       scrollFraction: u.scrollFraction,
-      overscan: hasOverscan ? _lineCells(u.lines.last) : null,
+      overscan: overscan,
+      scrollLineDelta: u.scrollLineDelta,
     );
   }
 

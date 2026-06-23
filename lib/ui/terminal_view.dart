@@ -330,6 +330,9 @@ class TerminalViewState extends State<TerminalView>
   GlyphCache get glyphCacheForTest => _glyphs;
 
   @visibleForTesting
+  GlyphAtlas? get atlasForTest => _atlas;
+
+  @visibleForTesting
   bool get isFlingingForTest => _flingTicker != null;
 
   @visibleForTesting
@@ -511,6 +514,7 @@ class TerminalViewState extends State<TerminalView>
       lineHeight: widget.textStyle.lineHeight,
       devicePixelRatio: dpr,
     );
+    _atlas!.prewarmAscii();
   }
 
   void _disposeAtlas() {
