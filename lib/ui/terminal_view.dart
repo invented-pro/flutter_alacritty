@@ -77,10 +77,10 @@ MouseCursor hoverCursorFor({
   return base;
 }
 
-// Shared default: one stateless, always-enabled UrlLinkProvider. Unmodifiable so
-// accidental mutation can't leak across TerminalView instances.
-final List<TerminalLinkProvider> _defaultLinkProviders =
-    List<TerminalLinkProvider>.unmodifiable([UrlLinkProvider()]);
+// Hosts opt in to regex/file-path links via [linkProviders]. OSC 8 hyperlinks
+// from the engine need no provider. An empty default avoids scanning every
+// visible row on each PTY update (Orca/xterm only scan a line on hover).
+const List<TerminalLinkProvider> _defaultLinkProviders = [];
 
 /// Pure render + input view over a [TerminalEngine].
 ///
@@ -300,7 +300,10 @@ class TerminalViewState extends State<TerminalView>
   StreamSubscription<void>? _bellSub;
 
   LinkOverlay _linkOverlay = LinkOverlay.empty;
-  bool _linkRecomputeScheduled = false;
+  /// Viewport row under the pointer; drives lazy provider scans (one row only).
+  int? _hoverLinkRow;
+  int _lastDisplayOffset = 0;
+  double _lastScrollFraction = 0;
 
   // The painter and UI helpers read the grid directly; the engine owns the
   // grid (single source of truth), and the view never paints before the
@@ -356,9 +359,13 @@ class TerminalViewState extends State<TerminalView>
     _focus.addListener(_handleImeFocusChange);
     _bellSub = _engine.bell.listen((_) => _flashBell());
     for (final p in widget.linkProviders) {
-      p.addListener(_scheduleLinkRecompute);
+      p.addListener(_onProviderChanged);
     }
-    _grid.addListener(_scheduleLinkRecompute);
+    if (widget.linkProviders.isNotEmpty) {
+      _lastDisplayOffset = _grid.displayOffset;
+      _lastScrollFraction = _grid.scrollFraction;
+      _grid.addListener(_onGridLinkContextChanged);
+    }
   }
 
   @override
@@ -376,8 +383,16 @@ class TerminalViewState extends State<TerminalView>
       _bellSub = widget.engine.bell.listen((_) => _flashBell());
       _lastReportedCaretRect = null;
       // Re-wire grid listener to the new engine's grid.
-      oldWidget.engine.gridForView.removeListener(_scheduleLinkRecompute);
-      widget.engine.gridForView.addListener(_scheduleLinkRecompute);
+      if (oldWidget.linkProviders.isNotEmpty) {
+        oldWidget.engine.gridForView.removeListener(_onGridLinkContextChanged);
+      }
+      if (widget.linkProviders.isNotEmpty) {
+        widget.engine.gridForView.addListener(_onGridLinkContextChanged);
+        _lastDisplayOffset = widget.engine.gridForView.displayOffset;
+        _lastScrollFraction = widget.engine.gridForView.scrollFraction;
+      }
+      _hoverLinkRow = null;
+      _linkOverlay = LinkOverlay.empty;
       // The view is reused across engine swaps (TeamPilot host swaps engines
       // per member/tab). Abandon any in-flight IME pre-edit so a stale
       // composition can't commit into the swapped-in engine. notify:false +
@@ -444,12 +459,25 @@ class TerminalViewState extends State<TerminalView>
     }
     if (!identical(widget.linkProviders, oldWidget.linkProviders)) {
       for (final p in oldWidget.linkProviders) {
-        p.removeListener(_scheduleLinkRecompute);
+        p.removeListener(_onProviderChanged);
       }
       for (final p in widget.linkProviders) {
-        p.addListener(_scheduleLinkRecompute);
+        p.addListener(_onProviderChanged);
       }
-      _scheduleLinkRecompute();
+      if (oldWidget.linkProviders.isNotEmpty) {
+        _grid.removeListener(_onGridLinkContextChanged);
+      }
+      if (widget.linkProviders.isNotEmpty) {
+        _lastDisplayOffset = _grid.displayOffset;
+        _lastScrollFraction = _grid.scrollFraction;
+        _grid.addListener(_onGridLinkContextChanged);
+      } else {
+        _hoverLinkRow = null;
+        if (_linkOverlay != LinkOverlay.empty) {
+          setState(() => _linkOverlay = LinkOverlay.empty);
+        }
+      }
+      _refreshHoverLinkOverlay();
     }
   }
 
@@ -505,9 +533,9 @@ class TerminalViewState extends State<TerminalView>
     _bellCtrl.dispose();
     _glyphs.dispose();
     _disposeAtlas();
-    _grid.removeListener(_scheduleLinkRecompute);
+    _grid.removeListener(_onGridLinkContextChanged);
     for (final p in widget.linkProviders) {
-      p.removeListener(_scheduleLinkRecompute);
+      p.removeListener(_onProviderChanged);
     }
     super.dispose();
   }
@@ -524,45 +552,84 @@ class TerminalViewState extends State<TerminalView>
     }
   }
 
-  // Coalesce all grid/provider notifications in the current event-loop turn
-  // into a single recompute that runs as a microtask — i.e. before the next
-  // frame paints. This keeps link decorations frame-coherent with scrolling
-  // (alacritty recomputes hints every render) instead of lagging behind a
-  // trailing debounce, while still collapsing bursts (heavy output) to one
-  // recompute per turn.
-  void _scheduleLinkRecompute() {
-    if (_linkRecomputeScheduled) return;
-    _linkRecomputeScheduled = true;
-    scheduleMicrotask(() {
-      _linkRecomputeScheduled = false;
-      _recomputeLinksNow();
-    });
+  /// Provider cache/async confirmation changed — refresh the hovered row only.
+  void _onProviderChanged() => _refreshHoverLinkOverlay();
+
+  /// Grid moved or the hovered row's content may have changed.
+  void _onGridLinkContextChanged() {
+    if (widget.linkProviders.isEmpty) return;
+    final scrollChanged = _grid.displayOffset != _lastDisplayOffset ||
+        _grid.scrollFraction != _lastScrollFraction;
+    _lastDisplayOffset = _grid.displayOffset;
+    _lastScrollFraction = _grid.scrollFraction;
+    if (scrollChanged) {
+      _refreshHoverLinkOverlay();
+      return;
+    }
+    if (_hoverLinkRow != null) {
+      _setLinkOverlayForRow(_hoverLinkRow!);
+    }
   }
 
-  void _recomputeLinksNow() {
-    if (!mounted) return;
-    if (widget.linkProviders.isEmpty) {
+  void _onHoverRowChanged(int row) {
+    if (widget.linkProviders.isEmpty) return;
+    if (_hoverLinkRow == row) return;
+    _hoverLinkRow = row;
+    _setLinkOverlayForRow(row);
+  }
+
+  void _clearHoverLinkOverlay() {
+    if (_hoverLinkRow == null && _linkOverlay == LinkOverlay.empty) return;
+    _hoverLinkRow = null;
+    if (_linkOverlay != LinkOverlay.empty) {
+      setState(() => _linkOverlay = LinkOverlay.empty);
+    }
+  }
+
+  void _refreshHoverLinkOverlay() {
+    final row = _hoverLinkRow;
+    if (row == null) {
       if (_linkOverlay != LinkOverlay.empty) {
         setState(() => _linkOverlay = LinkOverlay.empty);
       }
       return;
     }
-    final rows = <int, List<LinkCellRange>>{};
-    for (var row = 0; row < _grid.rows; row++) {
-      final text = _lineText(row);
-      if (text.trim().isEmpty) continue;
-      final ranges = <LinkCellRange>[];
-      for (final provider in widget.linkProviders) {
-        for (final span in provider.scan(text)) {
-          if (provider.isEnabled(span)) {
-            ranges.add(LinkCellRange(start: span.start, end: span.end));
-          }
+    _setLinkOverlayForRow(row);
+  }
+
+  List<LinkCellRange> _rangesForRow(int row) {
+    if (row < 0 || row >= _grid.rows) return const [];
+    final text = _lineText(row);
+    if (text.trim().isEmpty) return const [];
+    final ranges = <LinkCellRange>[];
+    for (final provider in widget.linkProviders) {
+      for (final span in provider.scan(text)) {
+        if (provider.isEnabled(span)) {
+          ranges.add(LinkCellRange(start: span.start, end: span.end));
         }
       }
-      if (ranges.isNotEmpty) rows[row] = ranges;
     }
-    final next = LinkOverlay(rows);
+    return ranges;
+  }
+
+  void _setLinkOverlayForRow(int row) {
+    if (!mounted || widget.linkProviders.isEmpty) return;
+    final ranges = _rangesForRow(row);
+    final next = ranges.isEmpty
+        ? LinkOverlay.empty
+        : LinkOverlay({row: ranges});
     if (next != _linkOverlay) setState(() => _linkOverlay = next);
+  }
+
+  bool _isProviderLinkCell(int row, int col) {
+    if (widget.linkProviders.isEmpty) return false;
+    final text = _lineText(row);
+    for (final provider in widget.linkProviders) {
+      for (final span in provider.scan(text)) {
+        if (provider.isEnabled(span) && span.contains(col)) return true;
+      }
+    }
+    return false;
   }
 
   String _lineText(int row) {
@@ -577,7 +644,6 @@ class TerminalViewState extends State<TerminalView>
   // LinkOverlay stores only cell ranges (not payloads); re-scan the line on
   // click to recover the covering span's payload.
   String? _payloadAt(int row, int col) {
-    if (!_linkOverlay.isLinkCell(row, col)) return null;
     final text = _lineText(row);
     for (final provider in widget.linkProviders) {
       for (final span in provider.scan(text)) {
@@ -856,6 +922,7 @@ class TerminalViewState extends State<TerminalView>
                   // bell / preedit layers above don't dirty it, and vice versa.
                   MouseRegion(
                     cursor: _hoverCursor,
+                    onExit: (_) => _clearHoverLinkOverlay(),
                     onHover: (e) => _updateHoverCursor(e.localPosition),
                     child: RepaintBoundary(
                       child: CustomPaint(

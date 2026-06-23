@@ -16,10 +16,11 @@ class LinkSpan {
 
 /// Host-injectable link source for `TerminalView`.
 ///
-/// The View calls [scan] (sync, cheap) over each visible line's text and
-/// [isEnabled] (sync) before decorating a span. Providers that confirm links
-/// asynchronously (e.g. filesystem validation) mutate their own state and call
-/// `notifyListeners`; the View listens and recomputes decorations.
+/// The View calls [scan] over a **single line** when the pointer hovers that
+/// row (Orca/xterm-style lazy detection) and on click to recover payloads.
+/// Providers that confirm links asynchronously (e.g. filesystem validation)
+/// mutate their own state and call `notifyListeners`; the View refreshes the
+/// hovered row only.
 ///
 /// The library performs NO IO on a provider's behalf — keeping
 /// flutter_alacritty embeddable and IO-free (Plan 2W library-seam principle).

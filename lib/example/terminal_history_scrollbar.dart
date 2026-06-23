@@ -33,12 +33,16 @@ class TerminalHistoryScrollbar extends StatefulWidget {
 
 class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
   bool _dragging = false;
+  double _lastScrollPos = 0;
+  int _lastModeFlags = 0;
 
   @override
   void initState() {
     super.initState();
+    final grid = widget.engine.grid;
+    _lastScrollPos = grid.displayOffset + grid.scrollFraction;
+    _lastModeFlags = grid.modeFlags;
     widget.engine.repaint.addListener(_onGridChanged);
-    widget.controller.addListener(_onGridChanged);
   }
 
   @override
@@ -47,22 +51,27 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
     if (oldWidget.engine != widget.engine) {
       oldWidget.engine.repaint.removeListener(_onGridChanged);
       widget.engine.repaint.addListener(_onGridChanged);
-    }
-    if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_onGridChanged);
-      widget.controller.addListener(_onGridChanged);
+      final grid = widget.engine.grid;
+      _lastScrollPos = grid.displayOffset + grid.scrollFraction;
+      _lastModeFlags = grid.modeFlags;
     }
   }
 
   @override
   void dispose() {
     widget.engine.repaint.removeListener(_onGridChanged);
-    widget.controller.removeListener(_onGridChanged);
     super.dispose();
   }
 
   void _onGridChanged() {
-    if (mounted && !_dragging) setState(() {});
+    if (!mounted || _dragging) return;
+    final grid = widget.engine.grid;
+    final scrollPos = grid.displayOffset + grid.scrollFraction;
+    final modeFlags = grid.modeFlags;
+    if (scrollPos == _lastScrollPos && modeFlags == _lastModeFlags) return;
+    _lastScrollPos = scrollPos;
+    _lastModeFlags = modeFlags;
+    setState(() {});
   }
 
   int get _historyCap => widget.historyLines.clamp(0, 1 << 20);

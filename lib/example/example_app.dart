@@ -15,6 +15,7 @@ import '../pty/pty_backend.dart';
 import '../render/cell_metrics.dart';
 import '../ui/search_bar.dart';
 import '../ui/terminal_shortcuts.dart';
+import '../links/url_link_provider.dart';
 import '../ui/terminal_view.dart';
 import 'terminal_history_scrollbar.dart';
 
@@ -481,6 +482,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
                               },
                               onSecondaryTapUp: _onViewSecondaryTapUp,
                               onLinkActivate: _onLinkActivate,
+                              linkProviders: [UrlLinkProvider()],
                             ),
                           if (_status != TermStatus.running)
                             _buildRestartLayer(),

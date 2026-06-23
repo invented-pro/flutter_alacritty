@@ -22,8 +22,11 @@ extension _TerminalViewPointer on TerminalViewState {
   void _updateHoverCursor(Offset local) {
     final (r, c, _) = _cellAt(local);
     final inBounds = _grid.rows > r && _grid.columns > c;
+    if (inBounds) {
+      _onHoverRowChanged(r);
+    }
     final isLink = inBounds &&
-        (isHyperlink(_grid.flagsAt(r, c)) || _linkOverlay.isLinkCell(r, c));
+        (isHyperlink(_grid.flagsAt(r, c)) || _isProviderLinkCell(r, c));
     final next = hoverCursorFor(
       hyperlink: isLink,
       modeFlags: _grid.modeFlags,

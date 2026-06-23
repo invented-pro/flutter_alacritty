@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/terminal_engine.dart';
 import 'package:flutter_alacritty/links/terminal_link_provider.dart';
-import 'package:flutter_alacritty/links/url_link_provider.dart';
 import 'package:flutter_alacritty/ui/terminal_view.dart';
 
 import 'fake_binding.dart';
@@ -91,11 +90,17 @@ Future<void> _pumpView(
         onSecondaryTapUp: onSecondaryTapUp,
         onLinkActivate: onLinkActivate,
         primaryTapActivatesLink: primaryTapActivatesLink,
-        linkProviders: linkProviders ?? [UrlLinkProvider()],
+        linkProviders: linkProviders ?? const [],
       ),
     ),
   ));
   await tester.pumpAndSettle();
+}
+
+Future<void> _hoverAt(WidgetTester tester, Offset global) async {
+  final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await gesture.moveTo(global);
+  await tester.pump();
 }
 
 void main() {
@@ -342,7 +347,7 @@ void main() {
   // Link provider (overlay) tests
   // -------------------------------------------------------------------------
 
-  testWidgets('linkOverlay is populated after debounce when provider matches',
+  testWidgets('linkOverlay decorates hovered row when provider matches',
       (tester) async {
     const matchText = 'STUB_LINK';
     final provider = _StubProvider(matchText, 'stub-payload');
@@ -356,7 +361,6 @@ void main() {
       linkProviders: [provider],
     );
 
-    // Throwaway click to populate the mirror grid from fullSnapshotSearched().
     final painterTopLeft =
         tester.getTopLeft(find.byType(CustomPaint).first);
     final pos = painterTopLeft + const Offset(2, 2);
@@ -365,15 +369,12 @@ void main() {
     await prime.up();
     await tester.pump();
 
-    // Advance past the 120ms debounce.
-    await tester.pump(const Duration(milliseconds: 150));
+    await _hoverAt(tester, pos);
 
     final state = tester.state<TerminalViewState>(find.byType(TerminalView));
     final overlay = state.linkOverlayForTest;
-    // Row 0, col 0 is inside STUB_LINK (start=0).
     expect(overlay.isLinkCell(0, 0), isTrue,
-        reason: 'overlay should mark the stub link cells as link cells');
-    // A column well beyond the match text should not be a link.
+        reason: 'hovering a provider link row should decorate that row only');
     expect(overlay.isLinkCell(0, matchText.length + 5), isFalse,
         reason: 'columns outside the span should not be link cells');
   });
@@ -404,8 +405,7 @@ void main() {
     await prime.up();
     await tester.pump();
 
-    // Wait for debounce to fire and overlay to be built.
-    await tester.pump(const Duration(milliseconds: 150));
+    await _hoverAt(tester, pos);
 
     // Ctrl+left-click on cell (0,0) which is inside STUB_LINK.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -444,8 +444,7 @@ void main() {
     await prime.up();
     await tester.pump();
 
-    // Wait for debounce.
-    await tester.pump(const Duration(milliseconds: 150));
+    await _hoverAt(tester, pos);
 
     // The overlay should be empty because the provider is disabled.
     final state = tester.state<TerminalViewState>(find.byType(TerminalView));
@@ -464,13 +463,7 @@ void main() {
         reason: 'disabled span should not trigger onLinkActivate');
   });
 
-  testWidgets(
-      'overlay tracks a grid change within a frame (no debounce stall on scroll)',
-      (tester) async {
-    // Reproduces the scroll bug: with a 120ms trailing debounce, the overlay
-    // is not recomputed while the grid keeps changing (e.g. during scroll), so
-    // decorations stick at stale viewport rows. The overlay must reflect the
-    // grid within one frame, well under any 120ms wait.
+  testWidgets('overlay refreshes hovered row after scroll', (tester) async {
     const matchText = 'STUB_LINK';
     final provider = _StubProvider(matchText, 'stub-payload');
     final binding = TextFakeBinding(matchText);
@@ -479,21 +472,27 @@ void main() {
 
     await _pumpView(tester, engine: engine, linkProviders: [provider]);
 
-    // Populate the grid (prime), then pump ONE short frame — far below 120ms.
     final painterTopLeft = tester.getTopLeft(find.byType(CustomPaint).first);
     final pos = painterTopLeft + const Offset(2, 2);
     final prime = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
     await prime.up();
-    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump();
+
+    await _hoverAt(tester, pos);
 
     final state = tester.state<TerminalViewState>(find.byType(TerminalView));
     expect(state.linkOverlayForTest.isLinkCell(0, 0), isTrue,
-        reason: 'overlay must update within a frame, not after a 120ms debounce '
-            '(otherwise link decorations stick during scroll)');
+        reason: 'hover should decorate the link row');
+
+    engine.scrollLines(1);
+    await tester.pump();
+
+    await _hoverAt(tester, pos);
+    expect(state.linkOverlayForTest.isLinkCell(0, 0), isTrue,
+        reason: 'overlay should refresh the hovered row after scroll');
   });
 
-  testWidgets(
-      'provider notifyListeners flows through debounce and updates the overlay',
+  testWidgets('provider notifyListeners refreshes the hovered row',
       (tester) async {
     const matchText = 'STUB_LINK';
     final provider = _AsyncStubProvider(matchText, 'stub-payload');
@@ -507,26 +506,22 @@ void main() {
       linkProviders: [provider],
     );
 
-    // Throwaway click to populate the mirror grid from fullSnapshotSearched().
     final painterTopLeft = tester.getTopLeft(find.byType(CustomPaint).first);
     final pos = painterTopLeft + const Offset(2, 2);
     final prime = await tester.startGesture(pos, kind: PointerDeviceKind.mouse);
     await prime.up();
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 150));
+
+    await _hoverAt(tester, pos);
 
     final state = tester.state<TerminalViewState>(find.byType(TerminalView));
-    // Not yet confirmed → the span is detected but not enabled.
     expect(state.linkOverlayForTest.isLinkCell(0, 0), isFalse,
         reason: 'unconfirmed async span should not be a link cell');
 
-    // Async confirmation fires notifyListeners; this must schedule a debounced
-    // recompute (not a direct one), after which the overlay marks the cell.
     provider.confirm();
-    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump();
 
     expect(state.linkOverlayForTest.isLinkCell(0, 0), isTrue,
-        reason: 'provider notification should flow through the debounce and '
-            'update the overlay once the span is enabled');
+        reason: 'provider notifyListeners should refresh the hovered row');
   });
 }
