@@ -11,6 +11,8 @@ import 'package:flutter_alacritty/render/glyph_cache.dart';
 import 'package:flutter_alacritty/render/mirror_grid.dart';
 import 'package:flutter_alacritty/render/terminal_painter.dart';
 
+import 'support/benchmark_thresholds.dart';
+
 /// Headless rendering benchmark for the grid painter. Reports, per representative
 /// 80×24 screen:
 ///   * draw-call counts per frame (drawRect = backgrounds after P2 merge/skip;
@@ -18,13 +20,13 @@ import 'package:flutter_alacritty/render/terminal_painter.dart';
 ///     drawLine = decorations),
 ///   * UI-thread paint() wall time over N warm frames.
 ///
-/// Tagged `benchmark` so it stays out of the normal suite. Run with:
+/// Tagged `benchmark` — excluded from PR CI (`--exclude-tags benchmark`).
+/// Run locally or in the nightly benchmark job:
 ///   flutter test --tags benchmark test/rendering_benchmark_test.dart
 ///
 /// These are UI-thread (Dart paint) numbers and draw-call counts only — they do
 /// NOT measure raster/GPU thread cost. For that, profile the real app
-/// (`flutter run --profile` + DevTools timeline). The draw-call counts are still
-/// the key signal for deciding P4: they are exactly what a glyph atlas removes.
+/// (`flutter run --profile` + DevTools timeline).
 class _CountingCanvas implements Canvas {
   int rects = 0;
   int paragraphs = 0;
@@ -45,10 +47,26 @@ class _CountingCanvas implements Canvas {
     atlasSprites += rstTransforms.length ~/ 4;
   }
 
-  // Everything else the painter calls (save/restore/translate/clipRect/…) is a
-  // no-op for counting purposes.
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+class _BenchResult {
+  const _BenchResult({
+    required this.usPerFrame,
+    required this.rects,
+    required this.paragraphs,
+    required this.atlasCalls,
+    required this.atlasSprites,
+    required this.lines,
+  });
+
+  final double usPerFrame;
+  final int rects;
+  final int paragraphs;
+  final int atlasCalls;
+  final int atlasSprites;
+  final int lines;
 }
 
 const int _cols = 80;
@@ -60,12 +78,10 @@ GlyphCache _warmCache() => GlyphCache(
       fontFamily: 'monospace',
       fontSize: 14,
       cellWidth: 8,
-      // Benchmark wants steady-state: build every glyph up front, never evict.
       maxEntries: 1 << 20,
       maxBuildsPerFrame: 1 << 20,
     );
 
-/// Builds a full-screen grid from per-row (codepoint, fg, bg, flags) producers.
 MirrorGrid _grid(
   int Function(int row, int col) cp, {
   int Function(int row, int col)? bg,
@@ -116,7 +132,7 @@ TerminalPainter _painter(MirrorGrid grid, GlyphCache glyphs, {GlyphAtlas? atlas}
       atlas: atlas,
     );
 
-void _report(String name, MirrorGrid grid, {bool useAtlas = false}) {
+_BenchResult _bench(String name, MirrorGrid grid, {bool useAtlas = false}) {
   final glyphs = _warmCache();
   final atlas = useAtlas
       ? GlyphAtlas(
@@ -126,18 +142,15 @@ void _report(String name, MirrorGrid grid, {bool useAtlas = false}) {
   final painter = _painter(grid, glyphs, atlas: atlas);
   const size = ui.Size(_cols * 8.0, _rows * 16.0);
 
-  // Warm caches/atlas (the atlas needs a couple of frames to build all glyphs).
   for (var i = 0; i < 4; i++) {
     final rec = ui.PictureRecorder();
     painter.paint(Canvas(rec), size);
     rec.endRecording().dispose();
   }
 
-  // Count draw calls on a warm frame.
   final counter = _CountingCanvas();
   painter.paint(counter as Canvas, size);
 
-  // Time N warm paints (UI-thread paint() cost).
   const n = 300;
   final sw = Stopwatch()..start();
   for (var i = 0; i < n; i++) {
@@ -154,48 +167,67 @@ void _report(String name, MirrorGrid grid, {bool useAtlas = false}) {
       'drawRawAtlas=${counter.atlasCalls}(${counter.atlasSprites} sprites)  '
       'drawLine=${counter.lines}  '
       'paint=${usPerFrame.toStringAsFixed(1)}us/frame');
+
+  return _BenchResult(
+    usPerFrame: usPerFrame,
+    rects: counter.rects,
+    paragraphs: counter.paragraphs,
+    atlasCalls: counter.atlasCalls,
+    atlasSprites: counter.atlasSprites,
+    lines: counter.lines,
+  );
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('scenario A — idle shell prompt (mostly default bg, one short line)', () {
-    // Row 0 = "user@host:~/project$ ", rest blank. Typical idle agent terminal.
     const prompt = r'user@host:~/project$ ';
     final grid = _grid(
       (r, c) => r == 0 && c < prompt.length ? prompt.codeUnitAt(c) : 32,
     );
-    _report('A idle-prompt', grid);
+    final r = _bench('A idle-prompt', grid);
+    expect(r.usPerFrame, lessThan(kPaintIdlePromptMaxUs));
+    // One full-viewport default-bg clear (self-sufficient layer).
+    expect(r.rects, 1);
+    expect(r.paragraphs, 20);
   });
 
-  test('scenario B — full-screen colored cells (htop-like, every cell non-default bg)', () {
-    // Every cell a non-default bg drawn from a small palette → exercises the
-    // run-length merge (adjacent same-color cells collapse to one rect).
+  test('scenario B — full-screen colored cells (htop-like)', () {
     const palette = [0x264653, 0x2A9D8F, 0xE9C46A, 0xF4A261, 0xE76F51];
     final grid = _grid(
-      (r, c) => 65 + ((r + c) % 26), // letters
-      bg: (r, c) => palette[((c ~/ 6) + r) % palette.length], // 6-wide color bands
+      (r, c) => 65 + ((r + c) % 26),
+      bg: (r, c) => palette[((c ~/ 6) + r) % palette.length],
       fg: (r, c) => 0x101010,
     );
-    _report('B colored-bands', grid);
+    final r = _bench('B colored-bands', grid);
+    expect(r.usPerFrame, lessThan(kPaintColoredBandsMaxUs));
   });
 
   test('scenario C — dense text, default bg (drawParagraph-bound)', () {
-    // Full screen of glyphs on the default bg: near-zero background rects, ~all
-    // cells emit a glyph → this is the drawParagraph count P4 collapses.
-    final grid = _grid((r, c) => 33 + ((r * 80 + c) % 94)); // printable ASCII
-    _report('C dense-text', grid);
-    _report('C dense-text', grid, useAtlas: true); // 1920 drawParagraph -> 1 drawRawAtlas
+    final grid = _grid((r, c) => 33 + ((r * 80 + c) % 94));
+    final plain = _bench('C dense-text', grid);
+    expect(plain.usPerFrame, lessThan(kPaintDenseTextMaxUs));
+    expect(plain.rects, kFullViewportClearRects);
+
+    final atlased = _bench('C dense-text', grid, useAtlas: true);
+    expect(atlased.usPerFrame, lessThan(kPaintDenseTextAtlasMaxUs));
+    expect(atlased.paragraphs, kDenseTextAtlasParagraphs);
+    expect(atlased.atlasCalls, kDenseTextAtlasCalls);
+    expect(atlased.atlasSprites, kDenseTextGlyphCount);
   });
 
   test('scenario D — worst case: dense text + per-cell alternating bg', () {
-    // Glyph in every cell AND a non-default bg in every cell, alternating colors
-    // so run-length merge can't help — the adversarial upper bound.
     final grid = _grid(
       (r, c) => 33 + ((r * 80 + c) % 94),
       bg: (r, c) => (c % 2 == 0) ? 0x402020 : 0x204020,
     );
-    _report('D worst-case', grid);
-    _report('D worst-case', grid, useAtlas: true);
+    final plain = _bench('D worst-case', grid);
+    expect(plain.usPerFrame, lessThan(kPaintWorstCaseMaxUs));
+
+    final atlased = _bench('D worst-case', grid, useAtlas: true);
+    expect(atlased.usPerFrame, lessThan(kPaintWorstCaseAtlasMaxUs));
+    expect(atlased.paragraphs, kDenseTextAtlasParagraphs);
+    expect(atlased.atlasCalls, kDenseTextAtlasCalls);
   });
 }

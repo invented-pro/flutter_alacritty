@@ -36,6 +36,10 @@ on:
       - "macos/**"
       - "android/**"
       - ".github/workflows/**"
+  schedule:
+    # Nightly performance regression gate (UTC 04:00).
+    - cron: "0 4 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -86,7 +90,41 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings lib test
 
       - name: Unit tests
-        run: flutter test test/
+        run: flutter test test/ --exclude-tags benchmark --exclude-tags visual
+
+  benchmark:
+    name: Performance benchmarks (Linux)
+    runs-on: ubuntu-22.04
+    # Nightly + manual — not on every PR (timing can vary across runners).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake git ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Build release Rust lib for stable engine timings
+        run: cargo build --release
+        working-directory: packages/rust_lib_flutter_alacritty/rust
+
+      - name: Rendering + engine benchmarks
+        run: flutter test --tags benchmark test/rendering_benchmark_test.dart test/engine_benchmark_test.dart
 
   package-linux:
     name: Package Linux (deb + AppImage)

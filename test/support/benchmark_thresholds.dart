@@ -1,0 +1,37 @@
+/// Regression ceilings for headless benchmark tests.
+///
+/// Values are calibrated on Linux CI-ish hardware (debug Flutter tests, release
+/// Rust cdylib when available) with ~2× headroom over typical local runs so
+/// unrelated machine variance does not flake PRs. Re-tune when a deliberate perf
+/// change lands (update the comment + number together).
+library;
+
+// ── TerminalPainter (µs per warm frame, 80×24) ────────────────────────────
+
+const double kPaintIdlePromptMaxUs = 400;
+const double kPaintColoredBandsMaxUs = 2500;
+const double kPaintDenseTextMaxUs = 1200;
+const double kPaintDenseTextAtlasMaxUs = 500;
+const double kPaintWorstCaseMaxUs = 2500;
+const double kPaintWorstCaseAtlasMaxUs = 1500;
+
+// ── Draw-call invariants (exact — structural, not timing) ──────────────────
+// Default-bg screens still emit one full-viewport clear rect (P2 self-sufficiency).
+
+const int kFullViewportClearRects = 1;
+const int kDenseTextGlyphCount = 80 * 24;
+const int kDenseTextAtlasParagraphs = 0;
+const int kDenseTextAtlasCalls = 1;
+
+// ── Engine FFI (µs per fixture ingest at 80×24, single advanceAndTakeDamage) ─
+
+const int kEngineMediumCellsMaxUs = 80_000;
+const int kEngineUnicodeMaxUs = 60_000;
+const int kEngineDenseCellsMaxUs = 2_000_000;
+const int kEngineLightCellsMaxUs = 30_000;
+
+/// Warmup iterations before timing engine fixtures (JIT + allocator settle).
+const int kEngineWarmupRuns = 1;
+
+/// Timed iterations per engine fixture; median is checked against ceilings.
+const int kEngineTimedRuns = 3;
