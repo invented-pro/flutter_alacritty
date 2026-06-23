@@ -512,9 +512,6 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
                         builder: (context, _) => TerminalHistoryScrollbar(
                           engine: _engine!,
                           controller: _controller,
-                          historyLines: _config.scrolling.history,
-                          viewportRows: _engine!.grid.rows,
-                          cellHeight: _metrics.height,
                         ),
                       ),
                   ],

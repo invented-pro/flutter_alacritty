@@ -4,11 +4,9 @@
 
 **Goal:** Unify wheel / trackpad / touch scroll in `TerminalView` with Alacritty-parity routing and batched PTY writes for TUI, while keeping scrollback on local sub-cell `scroll_pixels`.
 
-**Architecture:** `TerminalScrollController` owns one pixel accumulator, routes each delta via `scroll_destination` (mouse / Shift / DEC 1007), flushes history through `engine.scrollByPixels` and program scroll through `engine.scheduleWrite`. Input coalescing uses `engine.scheduleTask` + microtask scheduling shared with `scheduleWrite`. **No** alt-screen `scrollFraction` preview — TUI scroll stays line-discrete at the PTY boundary (same as gnome-terminal/VTE and Alacritty).
+**Status (2026-06-23):** Implemented. History **wheel** uses discrete `scrollLines` + pixel remainder (Alacritty parity); **pan/fling** uses awaited `scrollPixels` on a single serialized queue. Absolute scroll (`scrollTo*`) cancels pending gesture scroll and awaits `drainHistoryScroll` before applying. `flutter test` green.
 
-**Tech Stack:** Dart/Flutter, `flutter_alacritty` engine (`TerminalEngine`, `TerminalEngineClient`), `MirrorGrid`, `flutter test`.
-
-**Status (2026-06-23):** Implemented in working tree; `flutter test` 327/327. Row-level `Picture` cache and TUI visual smooth scroll explicitly **out of scope** (see §Out of scope).
+**Architecture (as built):** `TerminalScrollController` routes via `scroll_destination`. History wheel → `_pendingHistoryLines`; pan/fling → `_pendingHistoryPx`; both drain through one `_flushHistoryScroll` queue. TUI program scroll → `engine.scheduleWrite`. **No** alt-screen `scrollFraction` preview.
 
 ---
 
@@ -47,7 +45,8 @@ Scrollback feels smoother because `engine.scroll_pixels` updates `display_offset
 
 | Path | Behavior |
 |------|----------|
-| History | `scrollByPixels` — sub-cell, **wheel sign ≠ pan sign** (see Task 6) |
+| History wheel | `scrollLines` — discrete lines + sub-line remainder |
+| History pan/fling | `scrollPixels` — sub-cell, serialized queue, **wheel sign ≠ pan sign** |
 | Alt + DEC 1007 | `encodeAlternateScrollLines` batched via `scheduleWrite` |
 | Mouse report | `encodeMouseWheelLines` batched via `scheduleWrite` |
 | Shift + wheel | History (even in alt-screen) |

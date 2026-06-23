@@ -11,6 +11,7 @@ class _CountingFakeBinding implements EngineBinding {
   int scrollLinesCalls = 0;
   final List<int> scrollLinesArgs = [];
   int scrollApplyCalls = 0;
+  int scrollToBottomCalls = 0;
 
   GridUpdate _empty() => GridUpdate(
         full: true,
@@ -62,7 +63,28 @@ class _CountingFakeBinding implements EngineBinding {
   @override
   void resize(int columns, int rows) {}
   @override
-  Future<GridUpdate> scrollToBottom() async => _empty();
+  Future<GridUpdate> scrollToBottom() async {
+    scrollToBottomCalls++;
+    return _empty();
+  }
+
+  int scrollToTopCalls = 0;
+  int scrollToOffsetCalls = 0;
+  final List<double> scrollToOffsetArgs = [];
+
+  @override
+  Future<GridUpdate> scrollToTop() async {
+    scrollToTopCalls++;
+    return _empty();
+  }
+
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async {
+    scrollToOffsetCalls++;
+    scrollToOffsetArgs.add(offsetLines);
+    return _empty();
+  }
+
   @override
   void clearHistory() {}
   @override
@@ -120,30 +142,6 @@ void main() {
 
     expect(binding.scrollLinesCalls, 1);
     expect(binding.scrollLinesArgs.single, 5);
-    expect(binding.scrollApplyCalls, 1);
-  });
-
-  test('multiple scheduleScrollByPixels in one tick → 1 FFI scrollPixels',
-      () async {
-    final binding = _CountingFakeBinding();
-    final grid = MirrorGrid();
-    late void Function() pending;
-    final client = TerminalEngineClient(
-      binding: binding,
-      grid: grid,
-      schedule: (cb) => pending = cb,
-    );
-
-    client.scheduleScrollByPixels(4.5);
-    client.scheduleScrollByPixels(3.0);
-    client.scheduleScrollByPixels(-1.5);
-    expect(binding.scrollPixelsCalls, 0);
-
-    pending();
-    await Future<void>.value();
-
-    expect(binding.scrollPixelsCalls, 1);
-    expect(binding.scrollPixelsArgs.single, closeTo(6.0, 1e-9));
     expect(binding.scrollApplyCalls, 1);
   });
 
@@ -276,6 +274,28 @@ void main() {
     // Scroll must run before advance: 10 - 5 + 1 = 6, not (10 + 1) - 5.
     expect(binding.displayOffset, 6);
     expect(binding.scrollLinesArgs, [-5]);
+  });
+
+  test('scrollToBottom clears pending coalesced scroll', () async {
+    final binding = _CountingFakeBinding();
+    final grid = MirrorGrid();
+    late void Function() pending;
+    final client = TerminalEngineClient(
+      binding: binding,
+      grid: grid,
+      schedule: (cb) => pending = cb,
+    );
+
+    client.scheduleScrollBy(3);
+    client.scheduleScrollBy(2);
+    await client.scrollToBottom();
+
+    expect(binding.scrollToBottomCalls, 1);
+    expect(binding.scrollLinesCalls, 0);
+
+    pending();
+    await Future<void>.value();
+    expect(binding.scrollLinesCalls, 0);
   });
 
   test('flush after dispose is a no-op', () async {

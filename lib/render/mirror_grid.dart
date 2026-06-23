@@ -46,6 +46,7 @@ class GridUpdate {
     this.cursorBlinking = false,
     this.modeFlags = 0,
     this.displayOffset = 0,
+    this.historySize = 0,
     this.defaultFg = 0xD8D8D8,
     this.defaultBg = 0x181818,
     this.cursorColor = 0xFF000000,
@@ -64,6 +65,9 @@ class GridUpdate {
   final bool cursorBlinking;
   final int modeFlags;
   final int displayOffset;
+
+  /// Live scrollback above viewport (`total_lines - screen_lines`).
+  final int historySize;
   final int defaultFg;
   final int defaultBg;
   final int cursorColor;
@@ -100,6 +104,10 @@ abstract class TerminalGridView implements Listenable {
   bool get cursorBlinking;
   int get modeFlags;
   int get displayOffset;
+
+  /// Scrollback lines above the viewport; drives scrollbar geometry.
+  int get historySize;
+
   /// Program-set cursor color (OSC 12), or 0xFF000000 ([kCursorColorUnset]) when
   /// unset — in which case painters keep their inverse-video cursor.
   int get cursorColor;
@@ -153,6 +161,7 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   bool _cursorBlinking = false;
   int _modeFlags = 0;
   int _displayOffset = 0;
+  int _historySize = 0;
   double _scrollFraction = 0;
   // Overscan line (row -1): the row just above the viewport top, painted in the
   // sliver revealed when _scrollFraction > 0. Always sized to _columns.
@@ -184,6 +193,8 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   int get modeFlags => _modeFlags;
   @override
   int get displayOffset => _displayOffset;
+  @override
+  int get historySize => _historySize;
   @override
   int get cursorColor => _cursorColor;
   @override
@@ -284,6 +295,9 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
     _cursorBlinking = u.cursorBlinking;
     _modeFlags = u.modeFlags;
     _displayOffset = u.displayOffset;
+    if (u.full || u.historySize > 0) {
+      _historySize = u.historySize;
+    }
     _generation++;
     notifyListeners();
   }

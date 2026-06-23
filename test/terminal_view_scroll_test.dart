@@ -11,9 +11,11 @@ import 'fake_binding.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('multiple wheel events in one frame coalesce to one scrollPixels',
+  testWidgets('multiple wheel events in one frame coalesce to one scrollLines',
       (tester) async {
-    final binding = FakeBinding();
+    final binding = FakeBinding()
+      ..displayOffsetSim = 50
+      ..historySizeSim = 100;
     final pending = <void Function()>[];
     final engine = TerminalEngine.fromBinding(
       binding,
@@ -26,6 +28,7 @@ void main() {
       home: Scaffold(body: TerminalView(engine)),
     ));
     await tester.pumpAndSettle();
+    engine.refreshView();
 
     final center = tester.getCenter(find.byType(CustomPaint).first);
     for (var i = 0; i < 5; i++) {
@@ -36,17 +39,14 @@ void main() {
         ),
       );
     }
-    expect(binding.scrollCalls, 0);
+    // Five wheel ticks coalesce net lines into one awaited scrollLines batch.
     while (pending.isNotEmpty) {
       pending.removeAt(0)();
     }
-    await tester.pump();
     await Future<void>.value();
 
-    // Wheel scroll is now sub-cell pixel scroll. dy=120 down → -120 px into the
-    // engine (scrollMultiplier default 3 = neutral 1.0× gain); 5 events coalesce.
-    expect(binding.scrollCalls, 0);
-    expect(binding.scrollPixelsArgs.length, 1);
-    expect(binding.scrollPixelsArgs.single, closeTo(-600.0, 15.0));
+    expect(binding.scrollCalls, 1);
+    expect(binding.scrollLinesArgs.single, lessThan(0));
+    expect(binding.scrollPixelsArgs, isEmpty);
   });
 }

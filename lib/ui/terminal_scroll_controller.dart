@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter_alacritty/debug/terminal_scroll_trace.dart';
 import 'package:flutter_alacritty/engine/terminal_engine.dart';
 import 'package:flutter_alacritty/input/program_scroll_encoder.dart';
 import 'package:flutter_alacritty/input/scroll_accumulator.dart';
@@ -17,14 +19,20 @@ class TerminalScrollController {
     required double cellHeight,
     required int scrollMultiplier,
   })  : _accumulator = ScrollAccumulator(cellHeight: cellHeight),
+        _historyWheelAccumulator = ScrollAccumulator(cellHeight: cellHeight),
         _multiplier = scrollMultiplier / 3.0;
 
   final TerminalEngine engine;
   ScrollAccumulator _accumulator;
+  /// Pixel remainder for history wheel only (Alacritty `accumulated_scroll % height`).
+  ScrollAccumulator _historyWheelAccumulator;
   final double _multiplier;
 
   bool _historyScheduled = false;
+  bool _historyScrollInFlight = false;
+  int _historyGeneration = 0;
   double _pendingHistoryPx = 0;
+  int _pendingHistoryLines = 0;
   int _wheelCol = 1;
   int _wheelRow = 1;
 
@@ -39,6 +47,7 @@ class TerminalScrollController {
   void updateCellHeight(double cellHeight) {
     _cancelPendingProgram();
     _accumulator = ScrollAccumulator(cellHeight: cellHeight);
+    _historyWheelAccumulator = ScrollAccumulator(cellHeight: cellHeight);
   }
 
   void _cancelPendingProgram() {
@@ -46,11 +55,56 @@ class TerminalScrollController {
     _programScheduled = false;
   }
 
-  void dispose() => stopFling();
+  /// Drop coalesced history wheel/pan/fling deltas. Call before absolute
+  /// scroll (scrollbar, ScrollTo*) so a pending flush cannot override the
+  /// target position on the next microtask/frame.
+  ///
+  /// Pair with [drainHistoryScroll] before absolute engine scroll so an
+  /// in-flight `scrollPixels` / `scrollLines` cannot race past cancel.
+  void cancelPendingHistoryFlushes() {
+    if (_pendingHistoryPx != 0 ||
+        _pendingHistoryLines != 0 ||
+        _historyScheduled) {
+      TerminalScrollTrace.log(
+        'controller',
+        'cancelPendingHistoryFlushes px=$_pendingHistoryPx lines=$_pendingHistoryLines',
+      );
+    }
+    _pendingHistoryPx = 0;
+    _pendingHistoryLines = 0;
+    _historyScheduled = false;
+    _historyGeneration++;
+    stopFling();
+  }
+
+  /// Drop all pending history scroll state including wheel pixel remainder.
+  void cancelPendingHistory() {
+    cancelPendingHistoryFlushes();
+    _historyWheelAccumulator.reset();
+  }
+
+  /// Waits until no history scroll flush is scheduled, in flight, or pending.
+  /// Wired to [TerminalEngine.onDrainHistoryScroll] for absolute scroll paths.
+  Future<void> drainHistoryScroll() async {
+    for (;;) {
+      if (!_historyScrollInFlight &&
+          !_historyScheduled &&
+          _pendingHistoryPx == 0 &&
+          _pendingHistoryLines == 0) {
+        return;
+      }
+      if (!_historyScrollInFlight &&
+          !_historyScheduled &&
+          (_pendingHistoryPx != 0 || _pendingHistoryLines != 0)) {
+        _scheduleHistoryFlush();
+      }
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
 
   void onGestureStart() {
+    cancelPendingHistory();
     _accumulator.reset();
-    stopFling();
   }
 
   void setWheelCell({required int col, required int row}) {
@@ -74,12 +128,55 @@ class TerminalScrollController {
     final modeFlags = engine.grid.modeFlags;
     final dest = scrollDestination(modeFlags: modeFlags, shiftHeld: shiftHeld);
 
-    // Scrollback: sub-cell pixel scroll (local engine path).
-    // Wheel ([PointerScrollEvent.scrollDelta]) and drag/pan use opposite signs —
-    // same split as the pre-controller [terminal_view_pointer] paths.
+    // Scrollback: wheel uses discrete lines (Alacritty `scroll_terminal` parity);
+    // touch pan / fling keep sub-cell `scroll_pixels` for smooth drag.
     if (dest == ScrollDestination.history) {
       final scaled = dyPx * _multiplier;
-      _scheduleHistoryPixels(wheelStyle ? -scaled : scaled);
+      final signedPx = wheelStyle ? -scaled : scaled;
+      if (wheelStyle) {
+        final lines = _historyWheelAccumulator.ingest(
+          dyPx: signedPx,
+          multiplier: 1.0,
+        );
+        TerminalScrollTrace.log(
+          'controller',
+          'wheel ingest dy=$dyPx signedPx=${signedPx.toStringAsFixed(1)} '
+          'lines=$lines wheelRem=${_historyWheelAccumulator.remainderPx.toStringAsFixed(1)} '
+          'pendingLines=$_pendingHistoryLines '
+          'before ${_posSnapshot()}',
+        );
+        if (lines != 0) {
+          _pendingHistoryLines += lines;
+          _scheduleHistoryFlush();
+        }
+      } else {
+        final g = engine.grid;
+        final pos = g.displayOffset + g.scrollFraction;
+        if (signedPx < 0 && pos <= 0) {
+          TerminalScrollTrace.log(
+            'controller',
+            'pan skip at live bottom px=${signedPx.toStringAsFixed(1)}',
+          );
+          stopFling();
+          return;
+        }
+        if (signedPx > 0 &&
+            g.historySize > 0 &&
+            pos >= g.historySize.toDouble()) {
+          TerminalScrollTrace.log(
+            'controller',
+            'pan skip at history top px=${signedPx.toStringAsFixed(1)}',
+          );
+          stopFling();
+          return;
+        }
+        TerminalScrollTrace.log(
+          'controller',
+          'pan px+=${signedPx.toStringAsFixed(1)} pendingPx=$_pendingHistoryPx '
+          '${_posSnapshot()}',
+        );
+        _scheduleHistoryPixels(signedPx);
+      }
       return;
     }
 
@@ -125,19 +222,175 @@ class TerminalScrollController {
     _pendingProgramBytes.clear();
   }
 
-  void _scheduleHistoryPixels(double deltaPx) {
-    if (deltaPx == 0) return;
-    _pendingHistoryPx += deltaPx;
-    if (_historyScheduled) return;
+  void _scheduleHistoryFlush() {
+    if (_historyScheduled || _historyScrollInFlight) return;
     _historyScheduled = true;
-    engine.scheduleTask(_flushHistory);
+    engine.scheduleTask(() => unawaited(_flushHistoryScroll()));
   }
 
-  void _flushHistory() {
+  void _scheduleHistoryPixels(double deltaPx) {
+    if (deltaPx != 0) _pendingHistoryPx += deltaPx;
+    _scheduleHistoryFlush();
+  }
+
+  /// Serializes wheel line scroll and pan pixel scroll on one queue so
+  /// `scroll_lines` never races `scroll_pixels` on the engine.
+  Future<void> _flushHistoryScroll() async {
+    if (_historyScrollInFlight) return;
+    _historyScrollInFlight = true;
     _historyScheduled = false;
-    final px = _pendingHistoryPx;
-    _pendingHistoryPx = 0;
-    if (px != 0) engine.scrollByPixels(px);
+    final gen = _historyGeneration;
+    try {
+      while (_pendingHistoryLines != 0 || _pendingHistoryPx != 0) {
+        if (gen != _historyGeneration) break;
+
+        if (_pendingHistoryLines != 0) {
+          final lines = _pendingHistoryLines;
+          _pendingHistoryLines = 0;
+          TerminalScrollTrace.log(
+            'controller',
+            'flushHistoryLines net=$lines ${_posSnapshot()}',
+          );
+          await _applyHistoryLineScroll(lines, generation: gen);
+          if (gen != _historyGeneration) break;
+          TerminalScrollTrace.log(
+            'controller',
+            'flushHistoryLines done ${_posSnapshot()}',
+          );
+          continue;
+        }
+
+        if (_pendingHistoryPx != 0) {
+          final px = _pendingHistoryPx;
+          _pendingHistoryPx = 0;
+          await _applyHistoryPanPixels(px, generation: gen);
+          if (gen != _historyGeneration) break;
+        }
+      }
+    } finally {
+      _historyScrollInFlight = false;
+      if (_pendingHistoryLines != 0 || _pendingHistoryPx != 0) {
+        _scheduleHistoryFlush();
+      }
+    }
+  }
+
+  Future<void> _applyHistoryPanPixels(
+    double px, {
+    required int generation,
+  }) async {
+    if (px == 0) return;
+    if (generation != _historyGeneration) return;
+
+    final grid = engine.grid;
+    final pos = grid.displayOffset + grid.scrollFraction;
+    final cellH = _accumulator.cellHeight;
+
+    if (px < 0) {
+      if (pos <= 0) {
+        stopFling();
+        return;
+      }
+      // Large fling toward live bottom: skip incremental scroll_pixels FFI.
+      if (cellH > 0 && pos + px / cellH <= 0) {
+        TerminalScrollTrace.log(
+          'controller',
+          'pan snap→bottom px=${px.toStringAsFixed(1)} pos=${pos.toStringAsFixed(3)}',
+        );
+        await engine.scrollToBottom();
+        if (generation != _historyGeneration) return;
+        stopFling();
+        return;
+      }
+    } else if (px > 0 && grid.historySize > 0) {
+      if (pos >= grid.historySize) {
+        stopFling();
+        return;
+      }
+      if (cellH > 0 && pos + px / cellH >= grid.historySize) {
+        TerminalScrollTrace.log(
+          'controller',
+          'pan snap→top px=${px.toStringAsFixed(1)} pos=${pos.toStringAsFixed(3)}',
+        );
+        await engine.scrollToTop();
+        if (generation != _historyGeneration) return;
+        stopFling();
+        return;
+      }
+    }
+
+    TerminalScrollTrace.log(
+      'controller',
+      'flushHistoryPixels px=${px.toStringAsFixed(1)} ${_posSnapshot()}',
+    );
+
+    if (generation != _historyGeneration) return;
+    await engine.scrollPixels(px);
+    if (generation != _historyGeneration) return;
+
+    final after = engine.grid;
+    final posAfter = after.displayOffset + after.scrollFraction;
+    if (px < 0 && posAfter <= 0) {
+      stopFling();
+    } else if (px > 0 &&
+        after.historySize > 0 &&
+        posAfter >= after.historySize) {
+      stopFling();
+    }
+  }
+
+  /// Whole-line history scroll with hard snap at the edges (VTE
+  /// `scroll_to_bottom` / `scroll_to_top` semantics).
+  Future<void> _applyHistoryLineScroll(
+    int lines, {
+    required int generation,
+  }) async {
+    if (lines == 0) return;
+    if (generation != _historyGeneration) return;
+
+    final grid = engine.grid;
+    final pos = grid.displayOffset + grid.scrollFraction;
+
+    if (lines < 0) {
+      if (pos + lines <= 0) {
+        TerminalScrollTrace.log(
+          'controller',
+          'apply snap→bottom lines=$lines pos=${pos.toStringAsFixed(3)}',
+        );
+        await engine.scrollToBottom();
+        return;
+      }
+    } else {
+      final hist = grid.historySize;
+      if (hist > 0 && pos + lines >= hist) {
+        TerminalScrollTrace.log(
+          'controller',
+          'apply snap→top lines=$lines pos=${pos.toStringAsFixed(3)} hist=$hist',
+        );
+        await engine.scrollToTop();
+        return;
+      }
+    }
+    TerminalScrollTrace.log(
+      'controller',
+      'apply scrollLines($lines) pos=${pos.toStringAsFixed(3)}',
+    );
+    if (generation != _historyGeneration) return;
+    await engine.scrollLines(lines);
+  }
+
+  String _posSnapshot() {
+    final g = engine.grid;
+    return TerminalScrollTrace.pos(
+      displayOffset: g.displayOffset,
+      scrollFraction: g.scrollFraction,
+      historySize: g.historySize,
+    );
+  }
+
+  void dispose() {
+    cancelPendingHistory();
+    stopFling();
   }
 
   void startFling({
@@ -176,9 +429,25 @@ class TerminalScrollController {
       stopFling();
       return;
     }
+    final g = engine.grid;
+    final pos = g.displayOffset + g.scrollFraction;
+    final hist = g.historySize;
+    if (pos <= 0 && _flingVelocity < 0) {
+      TerminalScrollTrace.log('controller', 'fling stop at live bottom');
+      stopFling();
+      return;
+    }
+    if (hist > 0 && pos >= hist && _flingVelocity > 0) {
+      TerminalScrollTrace.log('controller', 'fling stop at history top');
+      stopFling();
+      return;
+    }
     onPanDelta(dyPx: _flingVelocity * dtMs / 1000.0, shiftHeld: _flingShiftHeld);
   }
 
   @visibleForTesting
   bool get isFlinging => _flingTicker != null;
+
+  @visibleForTesting
+  bool get historyScrollInFlight => _historyScrollInFlight;
 }

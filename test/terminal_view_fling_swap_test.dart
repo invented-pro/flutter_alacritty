@@ -1,6 +1,6 @@
 // Tests that an engine swap on a reused TerminalView stops any in-flight
 // kinetic fling. Before the fix, the fling ticker kept running after the swap,
-// so remaining fling frames would call _engine.scrollByPixels on the
+// so remaining fling frames would call scrollPixels on the
 // swapped-in engine's scrollback rather than the engine that started the fling.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

@@ -382,12 +382,14 @@ See Plan 2S (TODO) for the upstream SSH/Mosh integration roadmap.
 ## Scroll input architecture
 
 `TerminalView` routes all wheel / trackpad / touch-scroll gestures through an
-internal `TerminalScrollController` with a single pixel accumulator (Alacritty
-`scroll_terminal` parity):
+internal `TerminalScrollController`: a program-scroll accumulator for TUI/mouse
+reports and a separate history-wheel accumulator for discrete scrollback lines
+(Alacritty `scroll_terminal` parity):
 
 | Mode | Path |
 |------|------|
-| Normal scrollback | `engine.scrollByPixels` (local, sub-cell) |
+| Normal scrollback wheel | `scrollLines` via controller (discrete lines + remainder) |
+| Normal scrollback pan / fling | `scrollPixels` via controller (sub-cell, serialized) |
 | Alt-screen + DEC 1007 (`kModeAlternateScroll`) | Batched SS3 arrow keys via `engine.scheduleWrite` |
 | Mouse-report (`:set mouse=a`) | Batched SGR wheel reports via `scheduleWrite` |
 | Shift + wheel (any mode) | Scrollback history (local) |
@@ -403,7 +405,11 @@ local `scrollFraction` preview in alt-screen; only scrollback uses sub-cell
 pixels.
 
 `engine.scheduleWrite(bytes)` coalesces PTY-bound scroll bytes to one `output`
-event per microtask batch. TUI fling uses the same line accumulator.
+event per microtask batch. TUI fling uses the program-scroll accumulator.
+
+Absolute scroll (`scrollToBottom` / `scrollToTop` / `scrollToOffset`) cancels
+pending gesture scroll, awaits [TerminalScrollController.drainHistoryScroll],
+then applies the target position — so scrollbar drags do not race in-flight pan.
 
 `scrollMultiplier` (default `3`) scales OS scroll deltas; `3` is neutral 1.0×.
 

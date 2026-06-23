@@ -54,6 +54,10 @@ class _SlowBinding implements EngineBinding {
   @override
   Future<GridUpdate> scrollToBottom() async => _empty();
   @override
+  Future<GridUpdate> scrollToTop() async => _empty();
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async => _empty();
+  @override
   void clearHistory() {}
   @override
   void reconfigure(EngineConfig c) {}
@@ -136,6 +140,10 @@ class _ScrollSlowBinding implements EngineBinding {
   Future<GridUpdate> scrollPixels(double d) async => _empty();
   @override
   Future<GridUpdate> scrollToBottom() async => _empty();
+  @override
+  Future<GridUpdate> scrollToTop() async => _empty();
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async => _empty();
   @override
   void clearHistory() {}
   @override

@@ -318,27 +318,50 @@ class TerminalEngine {
   void selectionClear() => _binding?.selectionClear();
   String? selectionText() => _binding?.selectionText();
 
+  /// Host hook: cancel coalesced wheel/pan/fling history scroll (see
+  /// [TerminalScrollController.cancelPendingHistory]). [TerminalView] wires this.
+  VoidCallback? onCancelCoalescedScroll;
+
+  /// Host hook: wait for in-flight gesture scroll before absolute scroll.
+  /// [TerminalView] wires this to [TerminalScrollController.drainHistoryScroll].
+  Future<void> Function()? onDrainHistoryScroll;
+
+  void cancelCoalescedScrollInput() => onCancelCoalescedScroll?.call();
+
+  Future<void> _awaitHistoryScrollIdle() async =>
+      await onDrainHistoryScroll?.call();
+
   // ---- scroll proxies ----
   Future<void> scrollLines(int delta) async {
     await _client?.scrollLines(delta);
   }
 
-  /// Fire-and-forget scroll for input-driven paths (mouse wheel, trackpad
-  /// pan, touch fling). Multiple calls within one frame coalesce into one
-  /// engine call + one snapshot.
-  ///
-  /// For deterministic / awaited scroll (PageUp/Down, programmatic ScrollTo*),
-  /// use [scrollLines] / [scrollToBottom].
+  /// Fire-and-forget whole-line scroll for optional host use. Gesture input
+  /// is owned by [TerminalScrollController]; hosts should use [scrollLines] /
+  /// [scrollTo*] rather than mixing [scrollBy] with a wired controller.
   void scrollBy(int delta) => _client?.scheduleScrollBy(delta);
 
-  /// Fire-and-forget sub-cell pixel scroll for smooth wheel / trackpad / fling
-  /// input. Positive [deltaPx] scrolls up into history. Coalesces per frame like
-  /// [scrollBy]; the engine tracks the fractional offset and exposes it on the
-  /// grid as `scrollFraction` for the painter.
-  void scrollByPixels(double deltaPx) => _client?.scheduleScrollByPixels(deltaPx);
+  /// Awaited sub-cell scroll (touch pan / fling).
+  Future<void> scrollPixels(double deltaPx) async {
+    await _client?.scrollPixels(deltaPx);
+  }
 
   Future<void> scrollToBottom() async {
+    cancelCoalescedScrollInput();
+    await _awaitHistoryScrollIdle();
     await _client?.scrollToBottom();
+  }
+
+  Future<void> scrollToTop() async {
+    cancelCoalescedScrollInput();
+    await _awaitHistoryScrollIdle();
+    await _client?.scrollToTop();
+  }
+
+  Future<void> scrollToOffset(double offsetLines) async {
+    cancelCoalescedScrollInput();
+    await _awaitHistoryScrollIdle();
+    await _client?.scrollToOffset(offsetLines);
   }
 
   /// Clear scrollback history (alacritty ClearHistory). No-op until bound.

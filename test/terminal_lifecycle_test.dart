@@ -174,7 +174,9 @@ void main() {
 
   testWidgets('one-finger drag scrolls', (tester) async {
     final title = ValueNotifier<String>('t');
-    final binding = FakeBinding();
+    final binding = FakeBinding()
+      ..displayOffsetSim = 50
+      ..historySizeSim = 100;
     await tester.pumpWidget(ExampleTerminalApp(
         title: title,
         ptyFactory: ({required rows, required columns}) => _FakePty(),
@@ -198,7 +200,8 @@ void main() {
       kind: PointerDeviceKind.touch,
     );
     await tester.pump();
-    // Scrollback drag now uses sub-cell pixel scroll, not whole-line scroll.
+    await tester.pump();
+    // Scrollback drag uses sub-cell pixel scroll when not at a hard edge.
     expect(binding.scrollPixelsArgs, isNotEmpty);
     title.dispose();
   });

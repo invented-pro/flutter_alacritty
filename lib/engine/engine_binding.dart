@@ -27,6 +27,8 @@ abstract class EngineBinding {
   /// Sub-cell pixel scroll. Positive [deltaPx] scrolls up into history.
   Future<GridUpdate> scrollPixels(double deltaPx);
   Future<GridUpdate> scrollToBottom();
+  Future<GridUpdate> scrollToTop();
+  Future<GridUpdate> scrollToOffset(double offsetLines);
   void clearHistory();
   void reconfigure(EngineConfig config);
   void respondClipboardLoad(String text);
@@ -151,6 +153,16 @@ class FrbEngineBinding implements EngineBinding {
       _toGridUpdate(await engineScrollToBottom(engine: _engine));
 
   @override
+  Future<GridUpdate> scrollToTop() async =>
+      _toGridUpdate(await engineScrollToTop(engine: _engine));
+
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async =>
+      _toGridUpdate(
+        await engineScrollToOffset(engine: _engine, offsetLines: offsetLines),
+      );
+
+  @override
   void clearHistory() => engineClearHistory(engine: _engine);
 
   @override
@@ -233,6 +245,7 @@ class FrbEngineBinding implements EngineBinding {
       cursorBlinking: u.cursorBlinking,
       modeFlags: u.modeFlags,
       displayOffset: u.displayOffset,
+      historySize: u.historySize,
       defaultFg: u.defaultFg,
       defaultBg: u.defaultBg,
       cursorColor: u.cursorColor,

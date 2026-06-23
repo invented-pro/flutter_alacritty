@@ -152,6 +152,16 @@ class TerminalController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> scrollToTop() async {
+    await _engine?.scrollToTop();
+    notifyListeners();
+  }
+
+  Future<void> scrollToOffset(double offsetLines) async {
+    await _engine?.scrollToOffset(offsetLines);
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     // The controller does NOT own the engine — drop the reference so a

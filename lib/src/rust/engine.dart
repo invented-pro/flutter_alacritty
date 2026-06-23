@@ -106,6 +106,9 @@ class RenderUpdate {
   final bool cursorBlinking;
   final int modeFlags;
   final int displayOffset;
+
+  /// Scrollback lines above the viewport (`total_lines - screen_lines`).
+  final int historySize;
   final int defaultFg;
   final int defaultBg;
   final int cursorColor;
@@ -133,6 +136,7 @@ class RenderUpdate {
     required this.cursorBlinking,
     required this.modeFlags,
     required this.displayOffset,
+    required this.historySize,
     required this.defaultFg,
     required this.defaultBg,
     required this.cursorColor,
@@ -151,6 +155,7 @@ class RenderUpdate {
       cursorBlinking.hashCode ^
       modeFlags.hashCode ^
       displayOffset.hashCode ^
+      historySize.hashCode ^
       defaultFg.hashCode ^
       defaultBg.hashCode ^
       cursorColor.hashCode ^
@@ -171,6 +176,7 @@ class RenderUpdate {
           cursorBlinking == other.cursorBlinking &&
           modeFlags == other.modeFlags &&
           displayOffset == other.displayOffset &&
+          historySize == other.historySize &&
           defaultFg == other.defaultFg &&
           defaultBg == other.defaultBg &&
           cursorColor == other.cursorColor &&

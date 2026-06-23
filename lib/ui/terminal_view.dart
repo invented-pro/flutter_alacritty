@@ -152,10 +152,11 @@ class TerminalView extends StatefulWidget {
   final Duration doubleClickThreshold;
 
   /// Approximate lines scrolled per wheel notch (alacritty's
-  /// `scrolling.multiplier`; default 3). Scrollback is now sub-cell pixel
-  /// scroll, so this is applied to the platform pixel delta as
-  /// `scrollMultiplier / 3` — a raw wheel notch is ~3 lines of pixels, so the
-  /// default reproduces alacritty's 3-lines/notch and e.g. `1` ≈ one line/notch.
+  /// `scrolling.multiplier`; default 3). History wheel uses discrete
+  /// [scrollLines]; touch pan/fling use sub-cell [scrollPixels]. The multiplier
+  /// is applied to the platform pixel delta as `scrollMultiplier / 3` — a raw
+  /// wheel notch is ~3 lines of pixels, so the default reproduces alacritty's
+  /// 3-lines/notch and e.g. `1` ≈ one line/notch.
   final int scrollMultiplier;
 
   /// Preedit overlay colors / underline (packed RGB, alpha forced full).
@@ -338,6 +339,7 @@ class TerminalViewState extends State<TerminalView>
     _style = widget.textStyle.toTextStyle().copyWith(fontSize: _fontSize);
     _metrics = CellMetrics.measure(_style);
     _scrollController = _newScrollController();
+    _wireCoalescedScrollCancel();
     widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
     _glyphs = _newGlyphCache();
     _bellCtrl = AnimationController(
@@ -371,6 +373,7 @@ class TerminalViewState extends State<TerminalView>
     // / audible bell silently breaks. Pinned by the regression test
     // `bell after engine swap still flashes`.
     if (!identical(widget.engine, oldWidget.engine)) {
+      oldWidget.engine.onCancelCoalescedScroll = null;
       _bellSub?.cancel();
       _bellSub = widget.engine.bell.listen((_) => _flashBell());
       _lastReportedCaretRect = null;
@@ -399,6 +402,7 @@ class TerminalViewState extends State<TerminalView>
       // history scroll target the swapped-in engine (same pattern as resize).
       _scrollController.dispose();
       _scrollController = _newScrollController();
+      _wireCoalescedScrollCancel();
       _scrollController.onGestureStart();
       final seed = _resizeController.committed ?? _resizeController.current;
       _resizeController.dispose();
@@ -525,8 +529,17 @@ class TerminalViewState extends State<TerminalView>
         scrollMultiplier: widget.scrollMultiplier,
       );
 
+  void _wireCoalescedScrollCancel() {
+    widget.engine.onCancelCoalescedScroll =
+        _scrollController.cancelPendingHistory;
+    widget.engine.onDrainHistoryScroll =
+        _scrollController.drainHistoryScroll;
+  }
+
   @override
   void dispose() {
+    widget.engine.onCancelCoalescedScroll = null;
+    widget.engine.onDrainHistoryScroll = null;
     _scrollController.dispose();
     _resizeController.dispose();
     _blinkTimer?.cancel();

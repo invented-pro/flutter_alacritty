@@ -1,30 +1,21 @@
 import 'package:flutter/material.dart';
 
+import '../debug/terminal_scroll_trace.dart';
 import '../controller/terminal_controller.dart';
 import '../engine/terminal_engine.dart';
 import '../input/term_mode.dart';
+import 'terminal_scrollbar_geometry.dart';
 
-/// Vertical scrollbar for [ExampleTerminalApp] only (not part of the library API).
-///
-/// Maps thumb position on a **viewport-sized** track to the engine's
-/// `display_offset` (0 = live bottom). Unlike a `SingleChildScrollView` sized
-/// to `history × cellHeight` (millions of pixels, which trips Flutter's scroll
-/// limits), this keeps the track at the terminal height and maps proportionally.
+/// Example-only scrollbar mapped like VTE + GtkAdjustment (not library API).
 class TerminalHistoryScrollbar extends StatefulWidget {
   const TerminalHistoryScrollbar({
     required this.engine,
     required this.controller,
-    required this.historyLines,
-    required this.viewportRows,
-    required this.cellHeight,
     super.key,
   });
 
   final TerminalEngine engine;
   final TerminalController controller;
-  final int historyLines;
-  final int viewportRows;
-  final double cellHeight;
 
   @override
   State<TerminalHistoryScrollbar> createState() =>
@@ -33,14 +24,22 @@ class TerminalHistoryScrollbar extends StatefulWidget {
 
 class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
   bool _dragging = false;
+  double? _dragPositionFraction;
   double _lastScrollPos = 0;
+  int _lastHistorySize = 0;
   int _lastModeFlags = 0;
+
+  /// Coalesce rapid drag events: only the latest target is applied.
+  double? _pendingPositionFraction;
+  bool _scrollInFlight = false;
+  int _scrollGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     final grid = widget.engine.grid;
     _lastScrollPos = grid.displayOffset + grid.scrollFraction;
+    _lastHistorySize = grid.historySize;
     _lastModeFlags = grid.modeFlags;
     widget.engine.repaint.addListener(_onGridChanged);
   }
@@ -53,6 +52,7 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
       widget.engine.repaint.addListener(_onGridChanged);
       final grid = widget.engine.grid;
       _lastScrollPos = grid.displayOffset + grid.scrollFraction;
+      _lastHistorySize = grid.historySize;
       _lastModeFlags = grid.modeFlags;
     }
   }
@@ -67,66 +67,108 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
     if (!mounted || _dragging) return;
     final grid = widget.engine.grid;
     final scrollPos = grid.displayOffset + grid.scrollFraction;
-    final modeFlags = grid.modeFlags;
-    if (scrollPos == _lastScrollPos && modeFlags == _lastModeFlags) return;
+    if (scrollPos == _lastScrollPos &&
+        grid.modeFlags == _lastModeFlags &&
+        grid.historySize == _lastHistorySize) {
+      return;
+    }
     _lastScrollPos = scrollPos;
-    _lastModeFlags = modeFlags;
+    _lastHistorySize = grid.historySize;
+    _lastModeFlags = grid.modeFlags;
     setState(() {});
   }
 
-  int get _historyCap =>
-      // Example-only: uses config scrollback, not a live engine query — keep in
-      // sync with `TerminalConfig.scrolling.history` after reconfigure.
-      widget.historyLines.clamp(0, 1 << 20);
-
-  /// Lines the viewport can move through when scrollback is full.
-  int get _trackLines {
-    final viewport = widget.viewportRows.clamp(1, 10000);
-    return (_historyCap - viewport).clamp(0, _historyCap);
+  TerminalScrollbarGeometry _geometry(double trackHeight) {
+    final grid = widget.engine.grid;
+    return TerminalScrollbarGeometry(
+      historySize: grid.historySize,
+      viewportRows: grid.rows,
+      scrollOffsetLines: grid.displayOffset + grid.scrollFraction,
+      trackHeight: trackHeight,
+    );
   }
 
-  double _positionFraction() {
-    final track = _trackLines;
-    if (track <= 0) return 1.0;
+  Future<void> _scrollToPositionFraction(double positionFraction) async {
     final grid = widget.engine.grid;
-    final pos = (grid.displayOffset + grid.scrollFraction) / track;
-    // 1.0 = live bottom (thumb at bottom), 0.0 = top of history.
-    return (1.0 - pos).clamp(0.0, 1.0);
+    final historySize = grid.historySize;
+    if (historySize <= 0) return;
+
+    final geom = TerminalScrollbarGeometry(
+      historySize: historySize,
+      viewportRows: grid.rows,
+      scrollOffsetLines: 0,
+      trackHeight: 1,
+    );
+
+    if (geom.isNearLiveBottom(positionFraction)) {
+      TerminalScrollTrace.log(
+        'scrollbar',
+        'snap→bottom fraction=${positionFraction.toStringAsFixed(3)} '
+        '${_posSnapshot(grid)}',
+      );
+      await widget.controller.scrollToBottom();
+      return;
+    }
+    if (geom.isNearHistoryTop(positionFraction)) {
+      TerminalScrollTrace.log(
+        'scrollbar',
+        'snap→top fraction=${positionFraction.toStringAsFixed(3)} '
+        '${_posSnapshot(grid)}',
+      );
+      await widget.controller.scrollToTop();
+      return;
+    }
+
+    final target = geom.scrollOffsetForPosition(positionFraction);
+    TerminalScrollTrace.log(
+      'scrollbar',
+      'scrollToOffset($target) fraction=${positionFraction.toStringAsFixed(3)} '
+      '${_posSnapshot(grid)}',
+    );
+    await widget.controller.scrollToOffset(target);
   }
 
-  void _scrollToFraction(double fraction) {
-    final track = _trackLines;
-    if (track <= 0) return;
-    final grid = widget.engine.grid;
-    final targetLines = ((1.0 - fraction.clamp(0.0, 1.0)) * track).toDouble();
-    final current = grid.displayOffset + grid.scrollFraction;
-    final delta = targetLines - current;
-    if (delta.abs() < 0.001) return;
-    if (delta.abs() >= 1.0) {
-      widget.controller.scrollLines(delta.round());
-    } else {
-      widget.engine.scrollByPixels(delta * widget.cellHeight);
+  String _posSnapshot(dynamic grid) => TerminalScrollTrace.pos(
+        displayOffset: grid.displayOffset,
+        scrollFraction: grid.scrollFraction,
+        historySize: grid.historySize,
+      );
+
+  Future<void> _drainPendingScroll() async {
+    if (_scrollInFlight) return;
+    _scrollInFlight = true;
+    try {
+      while (_pendingPositionFraction != null) {
+        final fraction = _pendingPositionFraction!;
+        _pendingPositionFraction = null;
+        final gen = ++_scrollGeneration;
+        await _scrollToPositionFraction(fraction);
+        if (gen != _scrollGeneration) return;
+      }
+    } finally {
+      _scrollInFlight = false;
+      if (_pendingPositionFraction != null) {
+        await _drainPendingScroll();
+      }
     }
   }
 
   void _onTrackPointer(double localDy, double trackHeight) {
     if (trackHeight <= 0) return;
-    final fraction = (1.0 - (localDy / trackHeight)).clamp(0.0, 1.0);
-    _scrollToFraction(fraction);
-  }
+    final geom = _geometry(trackHeight);
+    if (!geom.visible) return;
 
-  ({double top, double height}) _thumbGeometry(double trackHeight) {
-    final track = _trackLines;
-    if (track <= 0) {
-      return (top: 0, height: trackHeight);
+    final positionFraction = TerminalScrollbarGeometry.positionFractionFromTrackDy(
+      localDy: localDy,
+      trackHeight: trackHeight,
+      thumbHeight: geom.thumbHeight,
+    );
+    _pendingPositionFraction = positionFraction;
+    if (_dragging) {
+      _dragPositionFraction = positionFraction;
+      setState(() {});
     }
-    final viewport = widget.viewportRows.clamp(1, track + 1);
-    final thumbFrac =
-        (viewport / (track + viewport)).clamp(0.08, 1.0);
-    final thumbH = trackHeight * thumbFrac;
-    final usable = trackHeight - thumbH;
-    final top = _positionFraction() * usable;
-    return (top: top, height: thumbH);
+    _drainPendingScroll();
   }
 
   @override
@@ -135,9 +177,7 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
     if (grid.modeFlags & kModeAltScreen != 0) {
       return const SizedBox(width: 0);
     }
-
-    final trackLines = _trackLines;
-    if (trackLines <= 0) {
+    if (grid.historySize <= 0) {
       return const SizedBox(width: 0);
     }
 
@@ -146,30 +186,47 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
         final trackHeight = constraints.maxHeight;
         if (trackHeight <= 0) return const SizedBox(width: 0);
 
-        final thumb = _thumbGeometry(trackHeight);
+        final geom = _geometry(trackHeight);
+        final thumbFraction = geom.positionFraction;
+        final paintFraction = _dragPositionFraction ?? thumbFraction;
+        final thumbTop = geom.thumbTopAt(paintFraction);
         final theme = ScrollbarTheme.of(context);
         final thickness = theme.thickness?.resolve({}) ?? 8.0;
         final radius = theme.radius ?? const Radius.circular(4);
-        final trackColor = theme.trackColor?.resolve({}) ??
-            const Color(0x33FFFFFF);
-        final thumbColor = theme.thumbColor?.resolve({}) ??
-            const Color(0x99FFFFFF);
+        final trackColor =
+            theme.trackColor?.resolve({}) ?? const Color(0x33FFFFFF);
+        final thumbColor =
+            theme.thumbColor?.resolve({}) ?? const Color(0x99FFFFFF);
 
         return SizedBox(
           width: 12,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onVerticalDragStart: (_) => _dragging = true,
-            onVerticalDragEnd: (_) => _dragging = false,
-            onVerticalDragCancel: () => _dragging = false,
+            onVerticalDragStart: (_) {
+              widget.engine.cancelCoalescedScrollInput();
+              _dragging = true;
+              _dragPositionFraction = null;
+            },
+            onVerticalDragEnd: (_) {
+              _dragging = false;
+              _dragPositionFraction = null;
+              setState(() {});
+            },
+            onVerticalDragCancel: () {
+              _dragging = false;
+              _dragPositionFraction = null;
+              setState(() {});
+            },
             onVerticalDragUpdate: (d) =>
                 _onTrackPointer(d.localPosition.dy, trackHeight),
-            onTapDown: (d) =>
-                _onTrackPointer(d.localPosition.dy, trackHeight),
+            onTapDown: (d) {
+              widget.engine.cancelCoalescedScrollInput();
+              _onTrackPointer(d.localPosition.dy, trackHeight);
+            },
             child: CustomPaint(
               painter: _ScrollbarPainter(
-                thumbTop: thumb.top,
-                thumbHeight: thumb.height,
+                thumbTop: thumbTop,
+                thumbHeight: geom.thumbHeight,
                 trackWidth: thickness,
                 radius: radius,
                 trackColor: trackColor,
@@ -204,12 +261,7 @@ class _ScrollbarPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final trackR = RRect.fromRectAndRadius(
-      Rect.fromLTWH(
-        size.width - trackWidth - 2,
-        0,
-        trackWidth,
-        size.height,
-      ),
+      Rect.fromLTWH(size.width - trackWidth - 2, 0, trackWidth, size.height),
       radius,
     );
     canvas.drawRRect(trackR, Paint()..color = trackColor);

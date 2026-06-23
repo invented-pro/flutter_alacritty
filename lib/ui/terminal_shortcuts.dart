@@ -204,7 +204,7 @@ Map<Type, Action<Intent>> defaultTerminalActions({
     }),
     ScrollToEdgeIntent: CallbackAction<ScrollToEdgeIntent>(onInvoke: (i) {
       if (i.top) {
-        engine.scrollLines(1 << 30); // clamps to top of history
+        controller.scrollToTop();
       } else {
         engine.scrollToBottom();
       }

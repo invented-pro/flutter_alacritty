@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../debug/terminal_scroll_trace.dart';
 import '../render/mirror_grid.dart';
 import 'engine_binding.dart';
 
@@ -37,7 +38,6 @@ class TerminalEngineClient {
   int? _pendingColumns;
   int? _pendingRows;
   int _pendingScrollDelta = 0;
-  double _pendingScrollPixels = 0;
   bool _scrollScheduled = false;
   bool _scrollApplying = false;
   bool _disposed = false;
@@ -161,34 +161,50 @@ class TerminalEngineClient {
   }
 
   Future<void> scrollLines(int delta) async {
+    TerminalScrollTrace.log(
+      'client',
+      'scrollLines($delta) before ${_gridPosSnapshot()}',
+    );
+    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollLines(delta));
+    TerminalScrollTrace.log(
+      'client',
+      'scrollLines($delta) after ${_gridPosSnapshot()}',
+    );
   }
 
-  /// Coalesced scroll. Multiple calls within one scheduling tick aggregate
-  /// into a single FFI scrollLines + refreshView. Use this for input-driven
-  /// scroll paths (wheel, trackpad pan, touch fling) where the per-event
-  /// snapshot rate would otherwise saturate the UI thread.
-  ///
-  /// Programmatic callers that need the future (PageUp/PageDown, ScrollTo*)
-  /// should keep using [scrollLines] / [scrollToBottom] which await the
-  /// underlying FFI.
+  Future<void> scrollPixels(double deltaPx) async {
+    TerminalScrollTrace.log(
+      'client',
+      'scrollPixels(${deltaPx.toStringAsFixed(1)}) before ${_gridPosSnapshot()}',
+    );
+    _clearPendingScroll();
+    _applyScrollUpdate(await _binding.scrollPixels(deltaPx));
+    TerminalScrollTrace.log(
+      'client',
+      'scrollPixels(${deltaPx.toStringAsFixed(1)}) after ${_gridPosSnapshot()}',
+    );
+  }
+
+  void _clearPendingScroll() {
+    if (_pendingScrollDelta != 0) {
+      TerminalScrollTrace.log(
+        'client',
+        'clearPendingScroll lines=$_pendingScrollDelta',
+      );
+    }
+    _pendingScrollDelta = 0;
+  }
+
+  /// Coalesced line scroll for hosts that call [TerminalEngine.scrollBy].
+  /// Input gestures route through [TerminalScrollController] instead.
   void scheduleScrollBy(int delta) {
     if (delta == 0 || _disposed) return;
     _pendingScrollDelta += delta;
     _ensureScrollScheduled();
   }
 
-  /// Coalesced sub-cell pixel scroll (smooth wheel / trackpad / fling). Positive
-  /// [deltaPx] scrolls up into history. Aggregates with [scheduleScrollBy] into a
-  /// single per-frame flush. See [scheduleScrollBy] for the scheduling model.
-  void scheduleScrollByPixels(double deltaPx) {
-    if (deltaPx == 0 || _disposed) return;
-    _pendingScrollPixels += deltaPx;
-    _ensureScrollScheduled();
-  }
-
-  bool get _hasPendingScroll =>
-      _pendingScrollDelta != 0 || _pendingScrollPixels != 0;
+  bool get _hasPendingScroll => _pendingScrollDelta != 0;
 
   /// Schedules a single post-frame [_applyPendingScroll] when scroll is pending
   /// and none is already queued. Idempotent — safe to call from
@@ -212,21 +228,20 @@ class TerminalEngineClient {
     _scrollScheduled = false;
     if (_disposed || !_hasPendingScroll || _scrollApplying) return;
     final delta = _pendingScrollDelta;
-    final pixels = _pendingScrollPixels;
+    TerminalScrollTrace.log(
+      'client',
+      'applyPendingScroll lines=$delta ${_gridPosSnapshot()}',
+    );
     _pendingScrollDelta = 0;
-    _pendingScrollPixels = 0;
     _scrollApplying = true;
     try {
-      // Apply discrete line scroll first (it resets the engine's sub-cell
-      // fraction), then the pixel delta rebuilds the fraction on top — so a
-      // pixel scroll coalesced with a line scroll in the same frame still lands
-      // at the right sub-cell offset rather than being snapped away after.
       if (delta != 0) {
         _applyScrollUpdate(await _binding.scrollLines(delta));
       }
-      if (!_disposed && pixels != 0) {
-        _applyScrollUpdate(await _binding.scrollPixels(pixels));
-      }
+      TerminalScrollTrace.log(
+        'client',
+        'applyPendingScroll done ${_gridPosSnapshot()}',
+      );
     } finally {
       _scrollApplying = false;
       _ensureScrollScheduled();
@@ -234,7 +249,42 @@ class TerminalEngineClient {
   }
 
   Future<void> scrollToBottom() async {
+    TerminalScrollTrace.log(
+      'client',
+      'scrollToBottom before ${_gridPosSnapshot()}',
+    );
+    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollToBottom());
+    TerminalScrollTrace.log(
+      'client',
+      'scrollToBottom after ${_gridPosSnapshot()}',
+    );
+  }
+
+  Future<void> scrollToTop() async {
+    TerminalScrollTrace.log(
+      'client',
+      'scrollToTop before ${_gridPosSnapshot()}',
+    );
+    _clearPendingScroll();
+    _applyScrollUpdate(await _binding.scrollToTop());
+    TerminalScrollTrace.log(
+      'client',
+      'scrollToTop after ${_gridPosSnapshot()}',
+    );
+  }
+
+  Future<void> scrollToOffset(double offsetLines) async {
+    TerminalScrollTrace.log(
+      'client',
+      'scrollToOffset($offsetLines) before ${_gridPosSnapshot()}',
+    );
+    _clearPendingScroll();
+    _applyScrollUpdate(await _binding.scrollToOffset(offsetLines));
+    TerminalScrollTrace.log(
+      'client',
+      'scrollToOffset($offsetLines) after ${_gridPosSnapshot()}',
+    );
   }
 
   void _applyScrollUpdate(GridUpdate update) {
@@ -269,4 +319,10 @@ class TerminalEngineClient {
     _disposed = true;
     _binding.dispose();
   }
+
+  String _gridPosSnapshot() => TerminalScrollTrace.pos(
+        displayOffset: _grid.displayOffset,
+        scrollFraction: _grid.scrollFraction,
+        historySize: _grid.historySize,
+      );
 }

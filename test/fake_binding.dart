@@ -17,6 +17,10 @@ class FakeBinding implements RewireableEngineBinding {
   int selStartCalls = 0;
   int selClearCalls = 0;
   int scrollToBottomCalls = 0;
+  int scrollToTopCalls = 0;
+  int scrollToOffsetCalls = 0;
+  final List<double> scrollToOffsetArgs = [];
+  int historySizeSim = 0;
   int fullSnapshotCalls = 0;
   int resizeCalls = 0;
   int lastResizeCols = 0;
@@ -55,6 +59,7 @@ class FakeBinding implements RewireableEngineBinding {
         cursorVisible: true,
         modeFlags: modeFlags,
         displayOffset: displayOffsetSim,
+        historySize: historySizeSim,
       );
 
   GridUpdate _hyperlinkSnapshot() {
@@ -93,6 +98,7 @@ class FakeBinding implements RewireableEngineBinding {
       cursorVisible: false,
       modeFlags: modeFlags,
       displayOffset: displayOffsetSim,
+      historySize: historySizeSim,
     );
   }
 
@@ -192,6 +198,7 @@ class FakeBinding implements RewireableEngineBinding {
       cursorVisible: snap.cursorVisible,
       modeFlags: snap.modeFlags,
       displayOffset: displayOffsetSim,
+      historySize: historySizeSim,
       scrollLineDelta: 0,
     );
   }
@@ -203,6 +210,20 @@ class FakeBinding implements RewireableEngineBinding {
   @override
   Future<GridUpdate> scrollToBottom() async {
     scrollToBottomCalls++;
+    displayOffsetSim = 0;
+    return _blank();
+  }
+  @override
+  Future<GridUpdate> scrollToTop() async {
+    scrollToTopCalls++;
+    displayOffsetSim = historySizeSim;
+    return _blank();
+  }
+  @override
+  Future<GridUpdate> scrollToOffset(double offsetLines) async {
+    scrollToOffsetCalls++;
+    scrollToOffsetArgs.add(offsetLines);
+    displayOffsetSim = offsetLines.round().clamp(0, historySizeSim);
     return _blank();
   }
   @override
@@ -285,6 +306,7 @@ class TextFakeBinding extends FakeBinding {
       cursorVisible: false,
       modeFlags: modeFlags,
       displayOffset: displayOffsetSim,
+      historySize: historySizeSim,
     );
   }
 
