@@ -226,7 +226,7 @@ void main() {
     expect(grid.columns, 100);
   });
 
-  test('resize during in-flight scroll apply flushes immediately', () async {
+  test('resize during in-flight scrollLines flushes immediately', () async {
     final binding = _ScrollSlowBinding();
     final grid = MirrorGrid()..initializeEmpty(24, 80);
     var ptyResizeCount = 0;
@@ -238,10 +238,7 @@ void main() {
     );
     client.onPtyResize = (_, _) => ptyResizeCount++;
 
-    client.scheduleScrollBy(1);
-    client.feed(Uint8List.fromList([1]));
-
-    // Drain is awaiting scrollLines inside _applyPendingScroll.
+    unawaited(client.scrollLines(1));
     await Future<void>.delayed(Duration.zero);
 
     client.resize(120, 40);
@@ -251,9 +248,6 @@ void main() {
     expect(grid.columns, 120);
 
     binding.scrollRelease.complete();
-    await Future<void>.delayed(Duration.zero);
-
-    binding.advanceRelease.complete();
     await Future<void>.delayed(Duration.zero);
   });
 }

@@ -341,14 +341,20 @@ class TerminalEngine {
     await _client?.scrollLines(delta);
   }
 
-  /// Fire-and-forget whole-line scroll for optional host use. Gesture input
-  /// is owned by [TerminalScrollController]; hosts should use [scrollLines] /
-  /// [scrollTo*] rather than mixing [scrollBy] with a wired controller.
-  void scrollBy(int delta) => _client?.scheduleScrollBy(delta);
-
-  /// Awaited sub-cell scroll (touch pan / fling).
+  /// Awaited sub-cell scroll (touch pan / fling via [TerminalScrollController]).
   Future<void> scrollPixels(double deltaPx) async {
     await _client?.scrollPixels(deltaPx);
+  }
+
+  /// Edge snap during an in-progress gesture flush. Skips coalesced-input
+  /// cancel/drain — [TerminalScrollController] already serializes the queue.
+  Future<void> scrollToBottomSnap() async {
+    await _client?.scrollToBottom();
+  }
+
+  /// See [scrollToBottomSnap].
+  Future<void> scrollToTopSnap() async {
+    await _client?.scrollToTop();
   }
 
   Future<void> scrollToBottom() async {

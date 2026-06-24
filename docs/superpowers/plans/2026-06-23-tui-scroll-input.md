@@ -4,7 +4,7 @@
 
 **Goal:** Unify wheel / trackpad / touch scroll in `TerminalView` with Alacritty-parity routing and batched PTY writes for TUI, while keeping scrollback on local sub-cell `scroll_pixels`.
 
-**Status (2026-06-23):** Implemented. History **wheel** uses discrete `scrollLines` + pixel remainder (Alacritty parity); **pan/fling** uses awaited `scrollPixels` on a single serialized queue. Absolute scroll (`scrollTo*`) cancels pending gesture scroll and awaits `drainHistoryScroll` before applying. `flutter test` green.
+**Status (2026-06-23):** Implemented. History **wheel** uses discrete `scrollLines` + pixel remainder (Alacritty parity); **pan/fling** uses awaited `scrollPixels` on a single serialized queue. Absolute scroll (`scrollTo*`) cancels pending gesture scroll and awaits `drainHistoryScroll` before applying. Edge snaps during gesture flush use `scrollToBottomSnap` / `scrollToTopSnap` (no cancel/drain re-entry). Legacy `scrollBy` / `scheduleScrollBy` coalescing removed.
 
 **Architecture (as built):** `TerminalScrollController` routes via `scroll_destination`. History wheel → `_pendingHistoryLines`; pan/fling → `_pendingHistoryPx`; both drain through one `_flushHistoryScroll` queue. TUI program scroll → `engine.scheduleWrite`. **No** alt-screen `scrollFraction` preview.
 

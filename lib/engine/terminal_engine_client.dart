@@ -37,9 +37,6 @@ class TerminalEngineClient {
   bool _advancing = false;
   int? _pendingColumns;
   int? _pendingRows;
-  int _pendingScrollDelta = 0;
-  bool _scrollScheduled = false;
-  bool _scrollApplying = false;
   bool _disposed = false;
 
   /// Fired only from [_flushPendingResize], after the engine reflow and mirror
@@ -107,10 +104,6 @@ class TerminalEngineClient {
       if (_pendingColumns != null || _pendingRows != null) {
         _flushPendingResize();
       }
-      // Apply coalesced scroll before ingesting PTY bytes. When scrolled back,
-      // alacritty's scroll_up increases display_offset; deferring scroll until
-      // after the drain lets output outrun wheel-down (can't reach the live end).
-      await _applyPendingScroll();
       if (_disposed || _buf.isEmpty) return;
       final batch = _buf.takeBytes();
       final update = await _binding.advanceAndTakeDamage(batch);
@@ -179,7 +172,6 @@ class TerminalEngineClient {
       'client',
       'scrollLines($delta) before ${_gridPosSnapshot()}',
     );
-    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollLines(delta));
     TerminalScrollTrace.log(
       'client',
@@ -192,7 +184,6 @@ class TerminalEngineClient {
       'client',
       'scrollPixels(${deltaPx.toStringAsFixed(1)}) before ${_gridPosSnapshot()}',
     );
-    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollPixels(deltaPx));
     TerminalScrollTrace.log(
       'client',
@@ -200,76 +191,11 @@ class TerminalEngineClient {
     );
   }
 
-  /// Clears coalesced wheel accumulators so an absolute scroll is not undone by
-  /// a pending post-frame flush (GtkScrollbar sets adjustment value directly).
-  void _clearPendingScroll() {
-    if (_pendingScrollDelta != 0) {
-      TerminalScrollTrace.log(
-        'client',
-        'clearPendingScroll lines=$_pendingScrollDelta',
-      );
-    }
-    _pendingScrollDelta = 0;
-  }
-
-  /// Coalesced line scroll for hosts that call [TerminalEngine.scrollBy].
-  /// Input gestures route through [TerminalScrollController] instead.
-  void scheduleScrollBy(int delta) {
-    if (delta == 0 || _disposed) return;
-    _pendingScrollDelta += delta;
-    _ensureScrollScheduled();
-  }
-
-  bool get _hasPendingScroll => _pendingScrollDelta != 0;
-
-  /// Schedules a single post-frame [_applyPendingScroll] when scroll is pending
-  /// and none is already queued. Idempotent — safe to call from
-  /// [scheduleScrollBy] and from a flush's `finally`.
-  void _ensureScrollScheduled() {
-    if (_disposed || _scrollScheduled || !_hasPendingScroll) return;
-    _scrollScheduled = true;
-    _schedule(() => _applyPendingScroll());
-  }
-
-  /// Applies the coalesced scroll accumulator. Called from the post-frame
-  /// scheduler and at the start of [_drain] so user scroll wins over PTY
-  /// output in the same frame.
-  ///
-  /// Re-entrancy is serialized by [_scrollApplying]: if a flush is already in
-  /// flight this is a no-op, and the in-flight flush's `finally` re-arms for
-  /// any delta that accumulated meanwhile — so a scheduled callback that fires
-  /// mid-flush is never lost (which would otherwise strand the accumulator with
-  /// [_scrollScheduled] stuck true and no callback queued).
-  Future<void> _applyPendingScroll() async {
-    _scrollScheduled = false;
-    if (_disposed || !_hasPendingScroll || _scrollApplying) return;
-    final delta = _pendingScrollDelta;
-    TerminalScrollTrace.log(
-      'client',
-      'applyPendingScroll lines=$delta ${_gridPosSnapshot()}',
-    );
-    _pendingScrollDelta = 0;
-    _scrollApplying = true;
-    try {
-      if (delta != 0) {
-        _applyScrollUpdate(await _binding.scrollLines(delta));
-      }
-      TerminalScrollTrace.log(
-        'client',
-        'applyPendingScroll done ${_gridPosSnapshot()}',
-      );
-    } finally {
-      _scrollApplying = false;
-      _ensureScrollScheduled();
-    }
-  }
-
   Future<void> scrollToBottom() async {
     TerminalScrollTrace.log(
       'client',
       'scrollToBottom before ${_gridPosSnapshot()}',
     );
-    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollToBottom());
     TerminalScrollTrace.log(
       'client',
@@ -282,7 +208,6 @@ class TerminalEngineClient {
       'client',
       'scrollToTop before ${_gridPosSnapshot()}',
     );
-    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollToTop());
     TerminalScrollTrace.log(
       'client',
@@ -295,7 +220,6 @@ class TerminalEngineClient {
       'client',
       'scrollToOffset($offsetLines) before ${_gridPosSnapshot()}',
     );
-    _clearPendingScroll();
     _applyScrollUpdate(await _binding.scrollToOffset(offsetLines));
     TerminalScrollTrace.log(
       'client',
@@ -328,7 +252,6 @@ class TerminalEngineClient {
         await Future<void>.delayed(Duration.zero);
       }
     }
-    await _applyPendingScroll();
   }
 
   void dispose() {

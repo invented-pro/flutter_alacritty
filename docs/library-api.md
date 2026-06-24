@@ -130,7 +130,7 @@ first `feed` or `resize` call, so cheap to hold in tests or before layout.
 | `grid` | `TerminalGridView` | Read-only mirror: cells, cursor, `displayOffset`, `scrollFraction`, `historySize` (live scrollback lines above the viewport = `total_lines − screen_lines`), `modeFlags`. |
 | `selectionText()` | `String?` | Engine-side selection text (already shaped & rewrapped). |
 | `searchSet`, `searchNext`, `searchPrev`, `searchClear` | search proxies | Direct passthroughs; consumers usually go via `TerminalController`. |
-| `scrollLines(delta)`, `scrollToBottom()`, `scrollToTop()`, `scrollToOffset(lines)` | `Future<void>` | Viewport scroll. `scrollToOffset` sets an absolute GtkAdjustment-style position (`0` = live bottom, `historySize` = top). Fire-and-forget wheel/pan uses `scrollBy` / `scrollByPixels` instead. |
+| `scrollLines(delta)`, `scrollPixels(deltaPx)`, `scrollToBottom()`, `scrollToTop()`, `scrollToOffset(lines)` | `Future<void>` | Viewport scroll. `scrollToOffset` sets an absolute GtkAdjustment-style position (`0` = live bottom, `historySize` = top). Wheel/pan/fling gestures route through the internal `TerminalScrollController` (`scrollLines` / `scrollPixels`); absolute scroll (`scrollTo*`) cancels pending gesture scroll first. |
 | `initializeEmpty(rows, columns)` | `void` | Optional: paints a blank grid before the first damage arrives. |
 | `dispose()` | `void` | Closes streams + tears down the native engine. Idempotent. |
 

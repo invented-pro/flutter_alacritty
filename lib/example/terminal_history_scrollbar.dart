@@ -203,6 +203,7 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onVerticalDragStart: (_) {
+              _scrollGeneration++;
               widget.engine.cancelCoalescedScrollInput();
               _dragging = true;
               _dragPositionFraction = null;
@@ -220,6 +221,7 @@ class _TerminalHistoryScrollbarState extends State<TerminalHistoryScrollbar> {
             onVerticalDragUpdate: (d) =>
                 _onTrackPointer(d.localPosition.dy, trackHeight),
             onTapDown: (d) {
+              _scrollGeneration++;
               widget.engine.cancelCoalescedScrollInput();
               _onTrackPointer(d.localPosition.dy, trackHeight);
             },

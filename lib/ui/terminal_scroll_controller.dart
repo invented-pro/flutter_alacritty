@@ -31,9 +31,7 @@ class TerminalScrollController {
   bool _historyScheduled = false;
   bool _historyScrollInFlight = false;
   int _historyGeneration = 0;
-  /// Set while a history flush calls [TerminalEngine.scrollTo*] for edge snap.
-  /// Prevents [drainHistoryScroll] from waiting on its own in-flight flush.
-  bool _reentrantHistorySnap = false;
+  final List<Completer<void>> _historyIdleWaiters = [];
   double _pendingHistoryPx = 0;
   int _pendingHistoryLines = 0;
   int _wheelCol = 1;
@@ -78,6 +76,22 @@ class TerminalScrollController {
     _historyScheduled = false;
     _historyGeneration++;
     stopFling();
+    _notifyHistoryIdle();
+  }
+
+  void _notifyHistoryIdle() {
+    if (_historyScrollInFlight ||
+        _historyScheduled ||
+        _pendingHistoryPx != 0 ||
+        _pendingHistoryLines != 0) {
+      return;
+    }
+    if (_historyIdleWaiters.isEmpty) return;
+    final waiters = List<Completer<void>>.from(_historyIdleWaiters);
+    _historyIdleWaiters.clear();
+    for (final w in waiters) {
+      if (!w.isCompleted) w.complete();
+    }
   }
 
   /// Drop all pending history scroll state including wheel pixel remainder.
@@ -89,20 +103,18 @@ class TerminalScrollController {
   /// Waits until no history scroll flush is scheduled, in flight, or pending.
   /// Wired to [TerminalEngine.onDrainHistoryScroll] for absolute scroll paths.
   Future<void> drainHistoryScroll() async {
-    if (_reentrantHistorySnap) return;
-    for (;;) {
-      if (!_historyScrollInFlight &&
-          !_historyScheduled &&
-          _pendingHistoryPx == 0 &&
-          _pendingHistoryLines == 0) {
-        return;
-      }
+    while (_historyScrollInFlight ||
+        _historyScheduled ||
+        _pendingHistoryPx != 0 ||
+        _pendingHistoryLines != 0) {
       if (!_historyScrollInFlight &&
           !_historyScheduled &&
           (_pendingHistoryPx != 0 || _pendingHistoryLines != 0)) {
         _scheduleHistoryFlush();
       }
-      await Future<void>.delayed(Duration.zero);
+      final waiter = Completer<void>();
+      _historyIdleWaiters.add(waiter);
+      await waiter.future;
     }
   }
 
@@ -276,6 +288,7 @@ class TerminalScrollController {
       if (_pendingHistoryLines != 0 || _pendingHistoryPx != 0) {
         _scheduleHistoryFlush();
       }
+      _notifyHistoryIdle();
     }
   }
 
@@ -301,7 +314,7 @@ class TerminalScrollController {
           'controller',
           'pan snap→bottom px=${px.toStringAsFixed(1)} pos=${pos.toStringAsFixed(3)}',
         );
-        await _engineScrollToBottom();
+        await engine.scrollToBottomSnap();
         if (generation != _historyGeneration) return;
         stopFling();
         return;
@@ -316,7 +329,7 @@ class TerminalScrollController {
           'controller',
           'pan snap→top px=${px.toStringAsFixed(1)} pos=${pos.toStringAsFixed(3)}',
         );
-        await _engineScrollToTop();
+        await engine.scrollToTopSnap();
         if (generation != _historyGeneration) return;
         stopFling();
         return;
@@ -361,7 +374,7 @@ class TerminalScrollController {
           'controller',
           'apply snap→bottom lines=$lines pos=${pos.toStringAsFixed(3)}',
         );
-        await _engineScrollToBottom();
+        await engine.scrollToBottomSnap();
         return;
       }
     } else {
@@ -371,7 +384,7 @@ class TerminalScrollController {
           'controller',
           'apply snap→top lines=$lines pos=${pos.toStringAsFixed(3)} hist=$hist',
         );
-        await _engineScrollToTop();
+        await engine.scrollToTopSnap();
         return;
       }
     }
@@ -381,24 +394,6 @@ class TerminalScrollController {
     );
     if (generation != _historyGeneration) return;
     await engine.scrollLines(lines);
-  }
-
-  Future<void> _engineScrollToBottom() async {
-    _reentrantHistorySnap = true;
-    try {
-      await engine.scrollToBottom();
-    } finally {
-      _reentrantHistorySnap = false;
-    }
-  }
-
-  Future<void> _engineScrollToTop() async {
-    _reentrantHistorySnap = true;
-    try {
-      await engine.scrollToTop();
-    } finally {
-      _reentrantHistorySnap = false;
-    }
   }
 
   String _posSnapshot() {
