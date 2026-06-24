@@ -488,4 +488,32 @@ void main() {
     expect(binding.scrollPixelsArgs, hasLength(1));
     expect(ctrl.historyScrollInFlight, isFalse);
   });
+
+  test('pan snap scrollToBottom during flush does not deadlock drain', () async {
+    final binding = FakeBinding()
+      ..displayOffsetSim = 5
+      ..historySizeSim = 100;
+    final pending = <void Function()>[];
+    final engine = TerminalEngine.fromBinding(
+      binding,
+      config: TerminalConfig.defaults(),
+      schedule: (cb) => pending.add(cb),
+    );
+    addTearDown(engine.dispose);
+
+    final ctrl = TerminalScrollController(
+      engine: engine,
+      cellHeight: 20,
+      scrollMultiplier: 3,
+    );
+    wireHistoryScrollHooks(engine, ctrl);
+    engine.refreshView();
+
+    ctrl.onPanDelta(dyPx: -500, shiftHeld: false);
+    await drain(pending);
+    await Future<void>.value();
+
+    expect(binding.scrollToBottomCalls, 1);
+    expect(ctrl.historyScrollInFlight, isFalse);
+  });
 }

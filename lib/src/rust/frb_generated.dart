@@ -74,7 +74,8 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
         stem: 'rust_lib_flutter_alacritty',
-        ioDirectory: 'packages/rust_lib_flutter_alacritty/rust/target/release/',
+        ioDirectory:
+            '../../packages/rust_lib_flutter_alacritty/rust/target/release/',
         webPrefix: 'pkg/',
         wasmBindgenName: 'wasm_bindgen',
       );

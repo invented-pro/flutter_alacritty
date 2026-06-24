@@ -466,10 +466,9 @@ packages:
   rust_lib_flutter_alacritty:
     dependency: "direct main"
     description:
-      name: rust_lib_flutter_alacritty
-      sha256: c277501d1372ea6863ff282d23c50d5fcd5d443c264ce5c6d6e3c60c925b8c47
-      url: "https://pub.flutter-io.cn"
-    source: hosted
+      path: "packages/rust_lib_flutter_alacritty"
+      relative: true
+    source: path
     version: "0.1.0"
   shelf:
     dependency: transitive

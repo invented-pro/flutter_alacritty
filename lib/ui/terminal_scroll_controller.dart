@@ -31,6 +31,9 @@ class TerminalScrollController {
   bool _historyScheduled = false;
   bool _historyScrollInFlight = false;
   int _historyGeneration = 0;
+  /// Set while a history flush calls [TerminalEngine.scrollTo*] for edge snap.
+  /// Prevents [drainHistoryScroll] from waiting on its own in-flight flush.
+  bool _reentrantHistorySnap = false;
   double _pendingHistoryPx = 0;
   int _pendingHistoryLines = 0;
   int _wheelCol = 1;
@@ -86,6 +89,7 @@ class TerminalScrollController {
   /// Waits until no history scroll flush is scheduled, in flight, or pending.
   /// Wired to [TerminalEngine.onDrainHistoryScroll] for absolute scroll paths.
   Future<void> drainHistoryScroll() async {
+    if (_reentrantHistorySnap) return;
     for (;;) {
       if (!_historyScrollInFlight &&
           !_historyScheduled &&
@@ -297,7 +301,7 @@ class TerminalScrollController {
           'controller',
           'pan snap→bottom px=${px.toStringAsFixed(1)} pos=${pos.toStringAsFixed(3)}',
         );
-        await engine.scrollToBottom();
+        await _engineScrollToBottom();
         if (generation != _historyGeneration) return;
         stopFling();
         return;
@@ -312,7 +316,7 @@ class TerminalScrollController {
           'controller',
           'pan snap→top px=${px.toStringAsFixed(1)} pos=${pos.toStringAsFixed(3)}',
         );
-        await engine.scrollToTop();
+        await _engineScrollToTop();
         if (generation != _historyGeneration) return;
         stopFling();
         return;
@@ -357,7 +361,7 @@ class TerminalScrollController {
           'controller',
           'apply snap→bottom lines=$lines pos=${pos.toStringAsFixed(3)}',
         );
-        await engine.scrollToBottom();
+        await _engineScrollToBottom();
         return;
       }
     } else {
@@ -367,7 +371,7 @@ class TerminalScrollController {
           'controller',
           'apply snap→top lines=$lines pos=${pos.toStringAsFixed(3)} hist=$hist',
         );
-        await engine.scrollToTop();
+        await _engineScrollToTop();
         return;
       }
     }
@@ -377,6 +381,24 @@ class TerminalScrollController {
     );
     if (generation != _historyGeneration) return;
     await engine.scrollLines(lines);
+  }
+
+  Future<void> _engineScrollToBottom() async {
+    _reentrantHistorySnap = true;
+    try {
+      await engine.scrollToBottom();
+    } finally {
+      _reentrantHistorySnap = false;
+    }
+  }
+
+  Future<void> _engineScrollToTop() async {
+    _reentrantHistorySnap = true;
+    try {
+      await engine.scrollToTop();
+    } finally {
+      _reentrantHistorySnap = false;
+    }
   }
 
   String _posSnapshot() {
