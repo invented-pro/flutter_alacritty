@@ -179,7 +179,7 @@ class _ScrollSlowBinding implements EngineBinding {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('resize during in-flight drain defers engine and pty until drain ends',
+  test('resize during in-flight drain flushes engine and mirror immediately',
       () async {
     final binding = _SlowBinding();
     final grid = MirrorGrid()..initializeEmpty(24, 80);
@@ -198,17 +198,13 @@ void main() {
 
     client.resize(120, 40);
 
-    expect(binding.resizeCalls, 0);
-    expect(ptyResizeCount, 0);
-    expect(grid.columns, 80);
-
-    binding.release.complete();
-    await Future<void>.delayed(Duration.zero);
-
     expect(binding.resizeCalls, 1);
     expect(binding.lastCols, 120);
     expect(ptyResizeCount, 1);
     expect(grid.columns, 120);
+
+    binding.release.complete();
+    await Future<void>.delayed(Duration.zero);
   });
 
   test('pty resize fires only after engine flush on immediate resize', () {
@@ -230,8 +226,7 @@ void main() {
     expect(grid.columns, 100);
   });
 
-  test('resize during in-flight scroll apply defers until drain ends',
-      () async {
+  test('resize during in-flight scroll apply flushes immediately', () async {
     final binding = _ScrollSlowBinding();
     final grid = MirrorGrid()..initializeEmpty(24, 80);
     var ptyResizeCount = 0;
@@ -250,22 +245,15 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     client.resize(120, 40);
-    expect(binding.resizeCalls, 0);
-    expect(ptyResizeCount, 0);
-
-    binding.scrollRelease.complete();
-    await Future<void>.delayed(Duration.zero);
-
-    // Still inside advanceAndTakeDamage — resize must stay deferred.
-    expect(binding.resizeCalls, 0);
-    expect(ptyResizeCount, 0);
-
-    binding.advanceRelease.complete();
-    await Future<void>.delayed(Duration.zero);
-
     expect(binding.resizeCalls, 1);
     expect(binding.lastCols, 120);
     expect(ptyResizeCount, 1);
     expect(grid.columns, 120);
+
+    binding.scrollRelease.complete();
+    await Future<void>.delayed(Duration.zero);
+
+    binding.advanceRelease.complete();
+    await Future<void>.delayed(Duration.zero);
   });
 }

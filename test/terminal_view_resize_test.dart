@@ -3,102 +3,128 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_alacritty/config/terminal_config.dart';
 import 'package:flutter_alacritty/engine/terminal_engine.dart';
+import 'package:flutter_alacritty/render/terminal_painter.dart';
 import 'package:flutter_alacritty/ui/terminal_view.dart';
 
 import 'fake_binding.dart';
 
+TerminalEngine _engine() => TerminalEngine.fromBinding(
+      FakeBinding(),
+      config: TerminalConfig.defaults(),
+      schedule: (_) {},
+    );
+
+Finder gridPaintFinder() => find.byWidgetPredicate(
+      (w) => w is CustomPaint && w.painter is TerminalPainter,
+    );
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('invokes onPtyResize after engine resize on first layout',
-      (tester) async {
-    final binding = FakeBinding();
-    final engine = TerminalEngine.fromBinding(
-      binding,
-      config: TerminalConfig.defaults(),
-      schedule: (_) {},
-    );
+  testWidgets('CustomPaint size matches mirror grid after layout', (tester) async {
+    final engine = _engine();
     addTearDown(engine.dispose);
-
-    final ptySizes = <(int, int)>[];
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: TerminalView(
-          engine,
-          onPtyResize: (c, r) => ptySizes.add((c, r)),
-        ),
-      ),
-    ));
-    await tester.pump();
-    await tester.pump();
-
-    expect(ptySizes, isNotEmpty);
-    expect(binding.resizeCalls, greaterThan(0));
-    expect(ptySizes.last.$1, binding.lastResizeCols);
-    expect(ptySizes.last.$2, binding.lastResizeRows);
-  });
-
-  testWidgets('engine swap onPtyResize matches viewport not default 80x24',
-      (tester) async {
-    final binding1 = FakeBinding();
-    final engine1 = TerminalEngine.fromBinding(
-      binding1,
-      config: TerminalConfig.defaults(),
-      schedule: (_) {},
-    );
-    final binding2 = FakeBinding();
-    final engine2 = TerminalEngine.fromBinding(
-      binding2,
-      config: TerminalConfig.defaults(),
-      schedule: (_) {},
-    );
-    addTearDown(() {
-      engine1.dispose();
-      engine2.dispose();
-    });
-
-    final ptySizes = <(int, int)>[];
-    final engineNotifier = ValueNotifier<TerminalEngine>(engine1);
-    addTearDown(engineNotifier.dispose);
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: SizedBox(
-          width: 900,
+          width: 800,
           height: 600,
-          child: ValueListenableBuilder<TerminalEngine>(
-            valueListenable: engineNotifier,
-            builder: (context, engine, _) => TerminalView(
-              engine,
-              onPtyResize: (c, r) => ptySizes.add((c, r)),
-            ),
+          child: TerminalView(engine),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final state = tester.state<TerminalViewState>(find.byType(TerminalView));
+    final grid = engine.gridForView;
+    final vp = state.viewport!;
+    final paintFinder = gridPaintFinder();
+    final paint = tester.widget<CustomPaint>(paintFinder);
+
+    expect(paint.size!.width, closeTo(grid.columns * vp.cellWidth, 0.01));
+    expect(paint.size!.height, closeTo(grid.rows * vp.cellHeight, 0.01));
+  });
+
+  testWidgets('resize updates paint size to match new grid', (tester) async {
+    final engine = _engine();
+    addTearDown(engine.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 400,
+          height: 300,
+          child: TerminalView(engine),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 1200,
+          height: 900,
+          child: TerminalView(engine),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final grid = engine.gridForView;
+    final state = tester.state<TerminalViewState>(find.byType(TerminalView));
+    final vp = state.viewport!;
+    final paintFinder = gridPaintFinder();
+    final paint = tester.widget<CustomPaint>(paintFinder);
+
+    expect(paint.size!.width, closeTo(grid.columns * vp.cellWidth, 0.01));
+    expect(paint.size!.height, closeTo(grid.rows * vp.cellHeight, 0.01));
+    expect(grid.columns, greaterThan(40));
+    expect(grid.rows, greaterThan(15));
+  });
+
+  testWidgets('beginPtyHold suppresses onPtyResize until endPtyHold', (tester) async {
+    final engine = _engine();
+    addTearDown(engine.dispose);
+    final commits = <(int, int)>[];
+
+    final key = GlobalKey<TerminalViewState>();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 800,
+          height: 600,
+          child: TerminalView(
+            engine,
+            key: key,
+            onPtyResize: (c, r) => commits.add((c, r)),
           ),
         ),
       ),
     ));
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
+    commits.clear();
 
-    expect(binding1.resizeCalls, greaterThan(0));
-    final committedCols = binding1.lastResizeCols;
-    final committedRows = binding1.lastResizeRows;
-    expect((committedCols, committedRows), isNot((80, 24)));
-    final countBeforeSwap = ptySizes.length;
+    key.currentState!.beginPtyHold();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 400,
+          height: 300,
+          child: TerminalView(
+            engine,
+            key: key,
+            onPtyResize: (c, r) => commits.add((c, r)),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(commits, isEmpty);
 
-    engineNotifier.value = engine2;
+    key.currentState!.endPtyHold();
     await tester.pump();
-    await tester.pump();
-
-    expect(binding2.resizeCalls, greaterThan(0));
-    expect(binding2.lastResizeCols, committedCols);
-    expect(binding2.lastResizeRows, committedRows);
-
-    final swapSizes = ptySizes.skip(countBeforeSwap);
-    expect(swapSizes, isNotEmpty);
-    for (final (cols, rows) in swapSizes) {
-      expect((cols, rows), isNot((80, 24)));
-      expect(cols, committedCols);
-      expect(rows, committedRows);
-    }
+    expect(commits, isNotEmpty);
   });
 }

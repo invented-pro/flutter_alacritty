@@ -28,6 +28,7 @@ abstract class EngineBinding {
   Future<GridUpdate> scrollPixels(double deltaPx);
   Future<GridUpdate> scrollToBottom();
   Future<GridUpdate> scrollToTop();
+  /// Absolute scroll offset in lines (`0` = live bottom).
   Future<GridUpdate> scrollToOffset(double offsetLines);
   void clearHistory();
   void reconfigure(EngineConfig config);

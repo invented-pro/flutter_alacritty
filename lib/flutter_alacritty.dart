@@ -22,9 +22,10 @@ export 'pty/flutter_pty_backend.dart';
 export 'theme/terminal_theme.dart';
 export 'ui/terminal_shortcuts.dart';
 export 'ui/terminal_view.dart';
-export 'ui/terminal_resize_controller.dart';
+export 'ui/terminal_viewport.dart';
+export 'ui/terminal_viewport_controller.dart';
 export 'ui/viewport_geometry.dart';
-export 'ui/resize_commit_policy.dart';
+export 'ui/viewport_resolver.dart';
 export 'src/rust/frb_generated.dart' show RustLib;
 // REMOVED: ui/terminal_screen.dart (was the god widget).
 // example/example_app.dart is NOT exported — it's the reference, not the API.

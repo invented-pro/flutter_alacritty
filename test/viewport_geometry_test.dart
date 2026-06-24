@@ -2,11 +2,12 @@ import 'package:flutter/painting.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_alacritty/render/cell_metrics.dart';
 import 'package:flutter_alacritty/ui/viewport_geometry.dart';
+import 'package:flutter_alacritty/ui/viewport_resolver.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  const cw = 9.0; // typical cell width at default font size
-  const ch = 18.0; // typical cell height
+  const cw = 9.0;
+  const ch = 18.0;
 
   CellMetrics cell() => CellMetrics(cw, ch);
 
@@ -24,8 +25,8 @@ void main() {
     });
   });
 
-  group('ViewportGeometryResolver', () {
-    const resolver = ViewportGeometryResolver();
+  group('ViewportResolver', () {
+    const resolver = ViewportResolver();
 
     ViewportQuery query(double w, double h) => ViewportQuery(
           available: Size(w, h),
@@ -33,65 +34,49 @@ void main() {
         );
 
     test('normal 80x24 viewport', () {
-      final grid = resolver.resolve(query(80 * cw, 24 * ch));
-      expect(grid, isNotNull);
-      expect(grid!.cols, 80);
-      expect(grid.rows, 24);
+      final vp = resolver.resolve(query(80 * cw, 24 * ch));
+      expect(vp.columns, 80);
+      expect(vp.screenLines, 24);
+      expect(vp.paddingX, 0);
+      expect(vp.paddingY, 0);
     });
 
-    test('fractional width floors down', () {
-      // 80 * 9 + 4.5 = 724.5 → cols = floor(724.5/9) = 80
-      final grid = resolver.resolve(query(80 * cw + 4.5, 24 * ch));
-      expect(grid!.cols, 80);
-
-      // 81 * 9 - 0.5 = 728.5 → cols = floor(728.5/9) = 80
-      final grid2 = resolver.resolve(query(81 * cw - 0.5, 24 * ch));
-      expect(grid2!.cols, 80);
+    test('fractional remainder becomes dynamic padding', () {
+      final vp = resolver.resolve(query(80 * cw + 4.5, 24 * ch + 8));
+      expect(vp.columns, 80);
+      expect(vp.screenLines, 24);
+      expect(vp.paddingX, closeTo(2.25, 0.001));
+      expect(vp.paddingY, closeTo(4.0, 0.001));
+      expect(
+        vp.paddingX * 2 + vp.cellAreaWidth,
+        closeTo(vp.windowWidth, 0.001),
+      );
+      expect(
+        vp.paddingY * 2 + vp.cellAreaHeight,
+        closeTo(vp.windowHeight, 0.001),
+      );
     });
 
-    test('fractional height floors down', () {
-      final grid = resolver.resolve(query(80 * cw, 24 * ch + 8));
-      expect(grid!.rows, 24);
+    test('clamps to minimum grid when container is tiny', () {
+      final vp = resolver.resolve(query(7 * cw, 3 * ch));
+      expect(vp.columns, TerminalGrid.minCols);
+      expect(vp.screenLines, TerminalGrid.minRows);
     });
 
-    test('rejects too-small but non-zero viewport (transition frame)', () {
-      // Below 8 cols
-      expect(resolver.resolve(query(7 * cw, 24 * ch)), isNull);
-      // Below 4 rows
-      expect(resolver.resolve(query(80 * cw, 3 * ch)), isNull);
+    test('zero viewport still returns minimum grid', () {
+      final vp = resolver.resolve(query(0, 0));
+      expect(vp.columns, TerminalGrid.minCols);
+      expect(vp.screenLines, TerminalGrid.minRows);
     });
 
-    test('rejects zero or negative viewport', () {
-      expect(resolver.resolve(query(0, 100)), isNull);
-      expect(resolver.resolve(query(100, 0)), isNull);
-    });
-
-    test('rejects sub-pixel-floor container even when cell grid would be usable',
-        () {
-      // Tiny cells (2px) would satisfy the 8x4 cell floor at only 16x8 px, but
-      // the container is below orca's 48x24 px floor — a transition frame.
+    test('tiny cells clamp to floor with padding', () {
       final q = ViewportQuery(
         available: const Size(16, 8),
         cell: CellMetrics(2, 2),
       );
-      expect(resolver.resolve(q), isNull);
-
-      // Same tiny cells but a container above the pixel floor → usable grid.
-      final q2 = ViewportQuery(
-        available: const Size(60, 30),
-        cell: CellMetrics(2, 2),
-      );
-      final grid = resolver.resolve(q2);
-      expect(grid, isNotNull);
-      expect(grid!.cols, 30);
-      expect(grid.rows, 15);
-    });
-
-    test('exactly at minimum returns grid', () {
-      expect(
-        resolver.resolve(query(TerminalGrid.minCols * cw, TerminalGrid.minRows * ch)),
-        isNotNull,
-      );
+      final vp = resolver.resolve(q);
+      expect(vp.columns, TerminalGrid.minCols);
+      expect(vp.screenLines, TerminalGrid.minRows);
     });
 
     test('reserve subtracts from available', () {
@@ -100,21 +85,9 @@ void main() {
         cell: cell(),
         reserve: const EdgeInsets.only(right: 14, bottom: 14),
       );
-      final grid = resolver.resolve(q);
-      expect(grid!.cols, 100); // (100*cw+14 - 14) / cw = 100
-      expect(grid!.rows, 30); // (30*ch+14 - 14) / ch = 30
-    });
-
-    test('reserve horizontal and vertical', () {
-      final q = ViewportQuery(
-        available: Size(80 * cw + 20, 24 * ch + 20),
-        cell: cell(),
-        reserve: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      );
-      final grid = resolver.resolve(q);
-      // (80*cw+20 - 20) / cw = 80, (24*ch+20 - 20) / ch = 24
-      expect(grid!.cols, 80);
-      expect(grid!.rows, 24);
+      final vp = resolver.resolve(q);
+      expect(vp.columns, 100);
+      expect(vp.screenLines, 30);
     });
   });
 }

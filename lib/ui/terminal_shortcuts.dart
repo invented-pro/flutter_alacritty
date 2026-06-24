@@ -206,7 +206,7 @@ Map<Type, Action<Intent>> defaultTerminalActions({
       if (i.top) {
         controller.scrollToTop();
       } else {
-        engine.scrollToBottom();
+        controller.scrollToBottom();
       }
       return null;
     }),

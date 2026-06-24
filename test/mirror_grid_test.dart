@@ -89,6 +89,15 @@ void main() {
     expect(g.displayOffset, 4);
   });
 
+  test('carries history size', () {
+    final g = MirrorGrid();
+    g.apply(GridUpdate(
+      full: true, rows: 24, columns: 80, lines: [row(0, ' ')],
+      cursorRow: 0, cursorCol: 0, cursorVisible: true, historySize: 120,
+    ));
+    expect(g.historySize, 120);
+  });
+
   test('carries mode flags', () {
     final g = MirrorGrid();
     g.apply(GridUpdate(

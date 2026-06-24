@@ -28,7 +28,8 @@ import '../links/terminal_link_provider.dart';
 import '../links/url_link_provider.dart';
 import '../render/cell_flags.dart';
 import '../render/cell_metrics.dart';
-import 'terminal_resize_controller.dart';
+import 'terminal_viewport.dart';
+import 'terminal_viewport_controller.dart';
 import 'terminal_scroll_controller.dart';
 import 'viewport_geometry.dart';
 import '../render/glyph_atlas.dart';
@@ -235,7 +236,8 @@ class TerminalViewState extends State<TerminalView>
   final ValueNotifier<bool> _blinkOn = ValueNotifier(true);
   Timer? _blinkTimer;
 
-  late TerminalResizeController _resizeController;
+  late TerminalViewportController _viewportController;
+  TerminalViewport? _viewport;
 
   // Wall-clock of the last terminal input; drives `cursorBlinkTimeout` (blink
   // pauses after inactivity, resumes solid-then-blinking on the next input).
@@ -276,6 +278,8 @@ class TerminalViewState extends State<TerminalView>
   LinkOverlay _linkOverlay = LinkOverlay.empty;
   /// Viewport row under the pointer; drives lazy provider scans (one row only).
   int? _hoverLinkRow;
+  /// Guards [MouseRegion.onExit] during rebuilds (spurious exit when overlay setState).
+  bool _mouseInGridLayer = false;
   int _lastDisplayOffset = 0;
   double _lastScrollFraction = 0;
 
@@ -320,17 +324,28 @@ class TerminalViewState extends State<TerminalView>
   }
 
   @visibleForTesting
-  TerminalResizeController get resizeControllerForTest => _resizeController;
+  TerminalViewportController get viewportControllerForTest => _viewportController;
 
-  void _syncPtyResizeHook() {
-    widget.engine.onPtyResize = widget.onPtyResize;
-  }
+  /// Last committed viewport from the most recent layout pass.
+  TerminalViewport? get viewport => _viewportController.committed;
+
+  /// Suppress PTY SIGWINCH while host chrome animates (e.g. sidebar). Engine
+  /// and mirror still track the live layout; call [endPtyHold] to flush one
+  /// SIGWINCH. Use a [GlobalKey<TerminalViewState>] to reach these from the host.
+  void beginPtyHold() => _viewportController.beginPtyHold();
+
+  /// Ends a [beginPtyHold] bracket; when [flush] is true, fires one deferred
+  /// `onPtyResize` if the grid changed during the hold.
+  void endPtyHold({bool flush = true}) =>
+      _viewportController.endPtyHold(flush: flush);
 
   @override
   void initState() {
     super.initState();
-    _resizeController = TerminalResizeController(engine: widget.engine);
-    _syncPtyResizeHook();
+    _viewportController = TerminalViewportController(
+      engine: widget.engine,
+      onPtyResize: widget.onPtyResize,
+    );
     _controller = widget.controller ?? (TerminalController()..attach(_engine));
     _ownsController = widget.controller == null;
     _focus = widget.focusNode ?? FocusNode();
@@ -404,18 +419,14 @@ class TerminalViewState extends State<TerminalView>
       _scrollController = _newScrollController();
       _wireCoalescedScrollCancel();
       _scrollController.onGestureStart();
-      final seed = _resizeController.committed ?? _resizeController.current;
-      _resizeController.dispose();
-      _resizeController = TerminalResizeController(
+      _viewportController.dispose();
+      _viewportController = TerminalViewportController(
         engine: widget.engine,
-        initialGrid: seed,
+        onPtyResize: widget.onPtyResize,
       );
-      _syncPtyResizeHook();
-      // Size the swapped-in engine from layout propose() + post-frame commit —
-      // never commitNow() here (default 80×24 would SIGWINCH the PTY early).
     }
     if (widget.onPtyResize != oldWidget.onPtyResize) {
-      _syncPtyResizeHook();
+      _viewportController.updateHostPtyResize(widget.onPtyResize);
     }
     // Re-attach controller / focus if the caller swapped them out. Rare; the
     // host typically creates both once.
@@ -459,7 +470,6 @@ class TerminalViewState extends State<TerminalView>
         _glyphs = _newGlyphCache();
         _disposeAtlas(); // rebuilt lazily in build() with the new metrics
       });
-      _commitAfterMetricsChange();
     }
     if (!identical(widget.linkProviders, oldWidget.linkProviders)) {
       for (final p in oldWidget.linkProviders) {
@@ -541,7 +551,7 @@ class TerminalViewState extends State<TerminalView>
     widget.engine.onCancelCoalescedScroll = null;
     widget.engine.onDrainHistoryScroll = null;
     _scrollController.dispose();
-    _resizeController.dispose();
+    _viewportController.dispose();
     _blinkTimer?.cancel();
     _blinkOn.dispose();
     _bellSub?.cancel();
@@ -558,9 +568,6 @@ class TerminalViewState extends State<TerminalView>
     }
     for (final p in widget.linkProviders) {
       p.removeListener(_onProviderChanged);
-    }
-    if (widget.engine.onPtyResize == widget.onPtyResize) {
-      widget.engine.onPtyResize = null;
     }
     super.dispose();
   }
@@ -609,6 +616,18 @@ class TerminalViewState extends State<TerminalView>
     if (_linkOverlay != LinkOverlay.empty) {
       setState(() => _linkOverlay = LinkOverlay.empty);
     }
+  }
+
+  void _onGridMouseEnter(PointerEnterEvent _) => _mouseInGridLayer = true;
+
+  void _onGridMouseExit(PointerExitEvent _) {
+    _mouseInGridLayer = false;
+    // Rebuild after hover overlay setState can dispose the old MouseRegion and
+    // fire a spurious onExit; defer clear so a matching onEnter cancels it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _mouseInGridLayer) return;
+      _clearHoverLinkOverlay();
+    });
   }
 
   void _refreshHoverLinkOverlay() {
@@ -680,17 +699,6 @@ class TerminalViewState extends State<TerminalView>
       widget.engine.setCellPixels(_metrics.width.round(), _metrics.height.round());
       _glyphs = _newGlyphCache();
       _disposeAtlas(); // rebuilt lazily in build() with the new metrics
-    });
-    _commitAfterMetricsChange();
-  }
-
-  /// After a cell-metrics change (font zoom / textStyle swap) the new grid is
-  /// computed by the next `build()`'s `propose()`. Force the controller to
-  /// commit it immediately afterwards so the engine + PTY adopt the new grid
-  /// without waiting for the stability gate or settle timer.
-  void _commitAfterMetricsChange() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _resizeController.commitNow();
     });
   }
 
@@ -843,10 +851,11 @@ class TerminalViewState extends State<TerminalView>
     final renderBox = context.findRenderObject() as RenderBox?;
     if (renderBox == null || !renderBox.attached) return;
     final localRect = Rect.fromLTWH(
-      _grid.cursorCol * _metrics.width,
+      (_viewport?.paddingX ?? 0) + _grid.cursorCol * _metrics.width,
       // Match the painter's sub-cell shift so the OS IME/preedit popup tracks
       // the visually-shifted cursor during fractional scroll.
-      (_grid.cursorRow + _grid.scrollFraction) * _metrics.height,
+      (_viewport?.paddingY ?? 0) +
+          (_grid.cursorRow + _grid.scrollFraction) * _metrics.height,
       _metrics.width,
       _metrics.height,
     );
@@ -855,7 +864,7 @@ class TerminalViewState extends State<TerminalView>
     if (globalRect == _lastReportedCaretRect) return;
     _lastReportedCaretRect = globalRect;
     _ime.setImeGeometry(
-      editableSize: renderBox.size,
+      editableSize: _viewport?.cellRect.size ?? renderBox.size,
       editableTransform: renderBox.getTransformTo(null),
       globalCaret: globalRect,
     );
@@ -878,11 +887,30 @@ class TerminalViewState extends State<TerminalView>
           available: Size(availW, availH),
           cell: _metrics,
         );
-        _resizeController.propose(query);
+        final viewport = _viewportController.apply(
+          query,
+          devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+        );
+        _viewport = viewport;
+        // Paint area tracks the mirror grid when it lags viewport (e.g. during
+        // a PTY drain) so the painter never clears more than it draws.
+        final gridPaintW =
+            _grid.columns > 0 ? _grid.columns * _metrics.width : 0.0;
+        final gridPaintH =
+            _grid.rows > 0 ? _grid.rows * _metrics.height : 0.0;
+        final paintSize = Size(
+          gridPaintW > 0
+              ? gridPaintW.clamp(0.0, viewport.cellAreaWidth)
+              : viewport.cellAreaWidth,
+          gridPaintH > 0
+              ? gridPaintH.clamp(0.0, viewport.cellAreaHeight)
+              : viewport.cellAreaHeight,
+        );
         _ensureAtlas(MediaQuery.devicePixelRatioOf(context));
         WidgetsBinding.instance
             .addPostFrameCallback((_) => _reportCaretRectToIme());
         Widget tree = Listener(
+            behavior: HitTestBehavior.translucent,
             onPointerDown: _onPointerDown,
             onPointerMove: _onPointerMove,
             onPointerUp: _onPointerUp,
@@ -907,7 +935,20 @@ class TerminalViewState extends State<TerminalView>
               );
               _panSamples.clear();
             },
-            child: GestureDetector(
+            child: SizedBox.expand(
+              child: MouseRegion(
+                cursor: _hoverCursor,
+                onEnter: _onGridMouseEnter,
+                onExit: _onGridMouseExit,
+                onHover: (e) => _updateHoverCursor(e.localPosition),
+                child: Stack(
+              children: [
+                Positioned(
+                  left: viewport.paddingX,
+                  top: viewport.paddingY,
+                  width: paintSize.width,
+                  height: paintSize.height,
+                  child: GestureDetector(
               supportedDevices: const {PointerDeviceKind.touch},
               behavior: HitTestBehavior.translucent,
               onTapDown: (_) => _scrollController.stopFling(),
@@ -926,36 +967,31 @@ class TerminalViewState extends State<TerminalView>
                   // Grid layer: repaints only on grid mutation. Its own
                   // RepaintBoundary keeps its raster isolated so the cursor /
                   // bell / preedit layers above don't dirty it, and vice versa.
-                  MouseRegion(
-                    cursor: _hoverCursor,
-                    onExit: (_) => _clearHoverLinkOverlay(),
-                    onHover: (e) => _updateHoverCursor(e.localPosition),
-                    child: RepaintBoundary(
-                      child: CustomPaint(
-                        size: Size.infinite,
-                        isComplex: true,
-                        willChange: true,
-                        painter: TerminalPainter(
-                          grid: _grid,
-                          glyphs: _glyphs,
-                          cellWidth: _metrics.width,
-                          cellHeight: _metrics.height,
-                          selectionColor:
-                              0x55000000 | (widget.theme.selection & 0xFFFFFF),
-                          searchColors: SearchColors(
-                            matchBg: widget.theme.searchMatch.bg,
-                            matchFg: widget.theme.searchMatch.fg,
-                            focusedBg: widget.theme.searchFocused.bg,
-                            focusedFg: widget.theme.searchFocused.fg,
-                          ),
-                          hintColors: HintColors(
-                            bg: widget.theme.hintStart.bg,
-                            fg: widget.theme.hintStart.fg,
-                          ),
-                          linkOverlay: _linkOverlay,
-                          atlas: _atlas,
-                          backgroundOpacity: widget.backgroundOpacity,
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      size: paintSize,
+                      isComplex: true,
+                      willChange: true,
+                      painter: TerminalPainter(
+                        grid: _grid,
+                        glyphs: _glyphs,
+                        cellWidth: _metrics.width,
+                        cellHeight: _metrics.height,
+                        selectionColor:
+                            0x55000000 | (widget.theme.selection & 0xFFFFFF),
+                        searchColors: SearchColors(
+                          matchBg: widget.theme.searchMatch.bg,
+                          matchFg: widget.theme.searchMatch.fg,
+                          focusedBg: widget.theme.searchFocused.bg,
+                          focusedFg: widget.theme.searchFocused.fg,
                         ),
+                        hintColors: HintColors(
+                          bg: widget.theme.hintStart.bg,
+                          fg: widget.theme.hintStart.fg,
+                        ),
+                        linkOverlay: _linkOverlay,
+                        atlas: _atlas,
+                        backgroundOpacity: widget.backgroundOpacity,
                       ),
                     ),
                   ),
@@ -964,7 +1000,7 @@ class TerminalViewState extends State<TerminalView>
                   IgnorePointer(
                     child: RepaintBoundary(
                       child: CustomPaint(
-                        size: Size.infinite,
+                        size: paintSize,
                         willChange: true,
                         painter: CursorPainter(
                           grid: _grid,
@@ -1000,7 +1036,12 @@ class TerminalViewState extends State<TerminalView>
                 ],
               ),
             ),
-          );
+          ),
+        ],
+            ),
+            ),
+            ),
+        );
         if (widget.padding != null) {
           tree = Padding(padding: widget.padding!, child: tree);
         }

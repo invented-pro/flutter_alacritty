@@ -20,7 +20,6 @@ class FakeBinding implements RewireableEngineBinding {
   int scrollToTopCalls = 0;
   int scrollToOffsetCalls = 0;
   final List<double> scrollToOffsetArgs = [];
-  int historySizeSim = 0;
   int fullSnapshotCalls = 0;
   int resizeCalls = 0;
   int lastResizeCols = 0;
@@ -34,6 +33,7 @@ class FakeBinding implements RewireableEngineBinding {
 
   /// Simulated scrollback offset for widget tests that drive [scrollLines].
   int displayOffsetSim = 0;
+  int historySizeSim = 0;
 
   /// Events the next [pumpEvents] should dispatch. Each entry is one of:
   ///   `('pty', Uint8List)`, `('title', String)`, `('reset_title', null)`,
@@ -43,8 +43,8 @@ class FakeBinding implements RewireableEngineBinding {
 
   GridUpdate _blank() => GridUpdate(
         full: true,
-        rows: 1,
-        columns: 1,
+        rows: lastResizeRows > 0 ? lastResizeRows : 1,
+        columns: lastResizeCols > 0 ? lastResizeCols : 1,
         lines: [
           LineCells(
             line: 0,
@@ -63,7 +63,8 @@ class FakeBinding implements RewireableEngineBinding {
       );
 
   GridUpdate _hyperlinkSnapshot() {
-    const cols = 80, rows = 24;
+    final cols = lastResizeCols > 0 ? lastResizeCols : 80;
+    final rows = lastResizeRows > 0 ? lastResizeRows : 24;
     final hyperlinks = Uint32List(cols);
     final flags = Uint16List(cols);
     hyperlinkAt.forEach((rc, id) {
