@@ -15,13 +15,16 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_rust_bridge: ^2.12.0
-  rust_lib_flutter_alacritty:
-    path: packages/rust_lib_flutter_alacritty
+  rust_lib_flutter_alacritty: ^0.1.0
   flutter_pty: ^0.4.0
   freezed_annotation: ^3.0.0
   toml: ^0.18.0
   url_launcher: ^6.3.2
   desktop_drop: ^0.7.1
+
+dependency_overrides:
+  rust_lib_flutter_alacritty:
+    path: packages/rust_lib_flutter_alacritty
 
 dev_dependencies:
   flutter_test:
