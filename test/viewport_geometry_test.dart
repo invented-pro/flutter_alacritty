@@ -69,14 +69,20 @@ void main() {
       expect(vp.screenLines, TerminalGrid.minRows);
     });
 
-    test('tiny cells clamp to floor with padding', () {
+    test('tiny cells apply pixel floor then center padding', () {
       final q = ViewportQuery(
         available: const Size(16, 8),
         cell: CellMetrics(2, 2),
       );
       final vp = resolver.resolve(q);
-      expect(vp.columns, TerminalGrid.minCols);
-      expect(vp.screenLines, TerminalGrid.minRows);
+      // Pixel floor (48×24) expands a transition-sized frame before cell math.
+      expect(vp.columns, TerminalGrid.minWidthPx ~/ 2);
+      expect(vp.screenLines, TerminalGrid.minHeightPx ~/ 2);
+      expect(TerminalGrid.isUsable(vp.columns, vp.screenLines), isTrue);
+      expect(vp.windowWidth, greaterThanOrEqualTo(TerminalGrid.minWidthPx));
+      expect(vp.windowHeight, greaterThanOrEqualTo(TerminalGrid.minHeightPx));
+      expect(vp.paddingX, greaterThanOrEqualTo(0));
+      expect(vp.paddingY, greaterThanOrEqualTo(0));
     });
 
     test('reserve subtracts from available', () {
