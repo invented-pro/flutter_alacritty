@@ -1,3 +1,5 @@
 tags:
   benchmark:
+    skip: "Benchmark tests — run with --tags benchmark"
   visual:
+    skip: "Visual golden tests — run with --tags visual"
