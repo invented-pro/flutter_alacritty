@@ -16,7 +16,10 @@ dependencies:
     sdk: flutter
   flutter_rust_bridge: ^2.12.0
   rust_lib_flutter_alacritty: ^0.1.0
-  flutter_pty: ^0.4.0
+  flutter_pty:
+    git:
+      url: https://github.com/invented-pro/flutter_pty
+      ref: 2026.07.01
   freezed_annotation: ^3.0.0
   toml: ^0.18.0
   url_launcher: ^6.3.2
@@ -30,12 +33,6 @@ dev_dependencies:
     sdk: flutter
   freezed: ^3.0.0
   build_runner: ^2.4.0
-
-# Path override for the git submodule (see .gitmodules).
-# Remove after rust_lib_flutter_alacritty is published on pub.dev.
-dependency_overrides:
-  rust_lib_flutter_alacritty:
-    path: packages/rust_lib_flutter_alacritty
 
 flutter:
   uses-material-design: true

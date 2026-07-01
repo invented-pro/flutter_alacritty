@@ -76,13 +76,24 @@ class ImeSession implements TextInputClient {
   }
 
   /// Positions the platform IME: editable bounds + caret (global coordinates).
+  ///
+  /// [localCaret] is the caret rectangle in the editable's local coordinate
+  /// space (origin at the editable's top-left, no pane offset). It's used by
+  /// the platform `setMarkedTextRect` path, which the Windows engine requires
+  /// for positioning the IME composition window — without it, the engine
+  /// transforms an empty `composing_rect_` by `editabletext_transform_` and
+  /// places the IME at the editable's top-left regardless of cursor position.
+  /// [globalCaret] is the caret rectangle in screen coordinates and is used by
+  /// `setCaretRect` (macOS accent menu).
   void setImeGeometry({
     required Size editableSize,
     required Matrix4 editableTransform,
     required Rect globalCaret,
+    required Rect localCaret,
   }) {
     if (!isAttached) return;
     _conn!.setEditableSizeAndTransform(editableSize, editableTransform);
+    _conn!.setComposingRect(localCaret);
     _conn!.setCaretRect(globalCaret);
   }
 

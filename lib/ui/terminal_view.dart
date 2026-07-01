@@ -209,6 +209,7 @@ class TerminalViewState extends State<TerminalView>
     onBackspace: _onImeBackspace,
   );
   Rect? _lastReportedCaretRect;
+  Rect? _lastReportedLocalCaretRect;
 
   int _cols = 0, _rows = 0;
   bool _lastFocused = false;
@@ -549,12 +550,17 @@ class TerminalViewState extends State<TerminalView>
     );
     final globalRect =
         renderBox.localToGlobal(localRect.topLeft) & localRect.size;
-    if (globalRect == _lastReportedCaretRect) return;
+    if (globalRect == _lastReportedCaretRect &&
+        _lastReportedLocalCaretRect == localRect) {
+      return;
+    }
     _lastReportedCaretRect = globalRect;
+    _lastReportedLocalCaretRect = localRect;
     _ime.setImeGeometry(
       editableSize: renderBox.size,
       editableTransform: renderBox.getTransformTo(null),
       globalCaret: globalRect,
+      localCaret: localRect,
     );
   }
 
