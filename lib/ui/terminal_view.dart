@@ -21,6 +21,7 @@ import '../engine/terminal_engine.dart';
 import '../input/ime_key_routing.dart';
 import '../input/ime_session.dart';
 import '../input/key_input.dart';
+import '../input/kitty_keyboard.dart';
 import '../input/mouse_input.dart';
 import '../input/paste.dart';
 import '../input/term_mode.dart';
@@ -208,6 +209,13 @@ class TerminalViewState extends State<TerminalView>
     onPreeditChanged: _onPreeditChanged,
     onBackspace: _onImeBackspace,
   );
+  // Kitty keyboard-protocol state — owned by the engine so multiple views
+  // (e.g. split panes that share an engine) all observe the same flag set.
+  // When [KittyKeyboardProtocol.disambiguate] is true, [_onKeyFallback]
+  // uses `encodeKeyWithKitty` to emit CSI u sequences for modified keys,
+  // which is what lets opencode / Claude Code / Codex CLI distinguish
+  // Shift+Enter from Enter.
+  KittyKeyboardProtocol get _kitty => _engine.kitty;
   Rect? _lastReportedCaretRect;
   Rect? _lastReportedLocalCaretRect;
 
@@ -440,15 +448,29 @@ class TerminalViewState extends State<TerminalView>
         )) {
       return KeyEventResult.ignored;
     }
-    final bytes = encodeKey(
-      event.logicalKey,
-      event.character,
-      shift: hw.isShiftPressed,
-      alt: hw.isAltPressed,
-      ctrl: hw.isControlPressed,
-      meta: hw.isMetaPressed,
-      modeFlags: _grid.modeFlags,
-    );
+    final bytes = encodeKeyWithKitty(
+          event.logicalKey,
+          event.character,
+          kitty: _kitty,
+          shift: hw.isShiftPressed,
+          alt: hw.isAltPressed,
+          ctrl: hw.isControlPressed,
+          // Flutter exposes a single "meta" bit (Cmd on macOS, Win key
+          // elsewhere); the Kitty protocol splits this into two PUA bits
+          // (super=8, meta=32). Map to super — modern TUIs (opencode,
+          // Claude Code, Codex CLI) bind shortcuts on `super`; the
+          // legacy `meta` bit is rarely tested outside tmux configs.
+          superPressed: hw.isMetaPressed,
+        ) ??
+        encodeKey(
+          event.logicalKey,
+          event.character,
+          shift: hw.isShiftPressed,
+          alt: hw.isAltPressed,
+          ctrl: hw.isControlPressed,
+          meta: hw.isMetaPressed,
+          modeFlags: _grid.modeFlags,
+        );
     if (bytes == null) return KeyEventResult.ignored;
     _onTerminalInputStart();
     _writeToEngine(bytes);

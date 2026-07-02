@@ -207,7 +207,7 @@ class _ExampleTerminalAppState extends State<ExampleTerminalApp> {
       engine.resize(columns: cols, rows: rows);
       engine.initializeEmpty(rows, cols);
       _outputSub = pty.output.listen(
-        engine.feed,
+        engine.feedWithKitty,
         onDone: () => _exitIfCurrent(pty, null),
       );
       pty.exitCode.then((code) => _exitIfCurrent(pty, code));

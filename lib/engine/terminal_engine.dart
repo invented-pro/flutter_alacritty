@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../config/terminal_config.dart';
+import '../input/kitty_keyboard.dart' show KittyKeyboardProtocol;
 import '../render/cell_flags.dart';
 import '../render/mirror_grid.dart';
 import '../src/rust/engine.dart' show EngineConfig;
@@ -132,6 +133,14 @@ class TerminalEngine {
   /// reserved for the in-package [TerminalView] painter via [gridForView].
   TerminalGridView get grid => _grid;
 
+  /// Kitty keyboard-protocol state. Consumers wire this into the PTY
+  /// output stream so `CSI ? u` capability queries get answered and
+  /// `CSI > N;N;N u` flag pushes update the active flag set, and
+  /// `TerminalView` reads the same instance so modified keys (e.g.
+  /// Shift+Enter) are encoded as CSI u sequences when the protocol is
+  /// active. See `lib/input/kitty_keyboard.dart`.
+  final KittyKeyboardProtocol kitty = KittyKeyboardProtocol();
+
   /// Package-internal: the rendering view needs the mutable [MirrorGrid] to
   /// wire `CustomPaint(repaint: ...)` and read cells. **External consumers
   /// should use [grid] instead** — mutating the returned [MirrorGrid] will
@@ -144,6 +153,26 @@ class TerminalEngine {
   void feed(Uint8List bytes) {
     _ensureBound();
     _client!.feed(bytes);
+  }
+
+  /// PTY → engine with Kitty keyboard-protocol handling. Scans [bytes]
+  /// for `CSI ? u` capability queries (responds with the advertised
+  /// flag set) and `CSI > push;pop;changes u` flag pushes (updates
+  /// [kitty] state and echoes the new state). Non-matching bytes are
+  /// forwarded to [feed]; responses are written back to the PTY via
+  /// [write].
+  ///
+  /// Consumers that want to advertise the Kitty protocol should call
+  /// this instead of [feed] from their `pty.output` listener. Hosts
+  /// that don't care (or run apps that don't speak the protocol) can
+  /// keep using [feed] directly — [kitty] will simply never enable any
+  /// flags and the key encoder falls back to legacy encoding.
+  void feedWithKitty(Uint8List bytes) {
+    final parsed = kitty.processOutbound(bytes);
+    if (parsed.passThrough.isNotEmpty) feed(parsed.passThrough);
+    for (final r in parsed.responses) {
+      write(r);
+    }
   }
 
   /// Cell-grid resize. Lazy-inits the binding on first call.
