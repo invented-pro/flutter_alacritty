@@ -76,4 +76,7 @@ class FlutterPtyBackend implements PtyBackend {
 
   @override
   void kill() => _pty.kill();
+
+  @override
+  void close() => _pty.close();
 }

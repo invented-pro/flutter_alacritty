@@ -19,7 +19,7 @@ dependencies:
   flutter_pty:
     git:
       url: https://github.com/invented-pro/flutter_pty
-      ref: 2026.07.02
+      ref: 2026.07.03
   freezed_annotation: ^3.0.0
   toml: ^0.18.0
   url_launcher: ^6.3.2

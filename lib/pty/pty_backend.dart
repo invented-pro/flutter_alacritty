@@ -18,4 +18,14 @@ abstract class PtyBackend {
 
   /// Terminate the child and release resources.
   void kill();
+
+  /// Release the underlying ConPTY / PTY handle. On Windows this drains
+  /// the pending write queue, closes the ConPTY input pipe, calls
+  /// `ClosePseudoConsole` (which terminates the attached shell and waits
+  /// for conhost to flush conout), then closes the output pipe and
+  /// joins the reader/writer threads. With the dedicated writer
+  /// thread, neither the `Dart_PostCObject_DL` path nor
+  /// `WriteFile(conin)` can block the UI thread. On unix it's a no-op.
+  /// Mirrors the alacritty tty/windows model.
+  void close();
 }
