@@ -504,16 +504,24 @@ final Map<LogicalKeyboardKey, int> _kKittyKeycodes = <LogicalKeyboardKey, int>{
 ///   * No modifier flags pressed → null (legacy byte is the same).
 ///   * Functional key (Enter, Tab, arrows, F-keys, ...) with any mods
 ///     → `CSI <keycode> ; <mods> u`.
-///   * Printable + Ctrl (a..z or Ctrl-symbol) → `CSI <ctrl-byte> ; 5 u`
-///     so apps can distinguish Ctrl+I from Tab, Ctrl+M from Enter, etc.
-///   * Printable + Shift/Alt/Meta/Super → `CSI <codepoint> ; <mods> u`,
-///     using the **shifted** character so the program can recover both
-///     the logical key and the produced text in one sequence.
+///   * Ctrl + printable, with any modifier combination → `CSI <ctrl-byte> ; <mods> u`
+///     **only when the legacy byte collides with another key**
+///     (Ctrl+I ↔ Tab, Ctrl+M ↔ Enter, Ctrl+[ ↔ Escape, Ctrl+Space ↔ NUL).
+///     For every other Ctrl+letter (Ctrl+P, Ctrl+R, Ctrl+T, …) — whose
+///     legacy byte is unique — we fall through to `encodeKey` and emit
+///     the legacy byte directly. The `mods` field of the emitted CSI-u
+///     sequence carries the full modifier mask, so Ctrl+Shift+I / Ctrl+I
+///     arrive as distinct events for apps that bind on the CSI-u form.
+///   * Printable with Shift / Alt / Meta / Super (no Ctrl) →
+///     `CSI <codepoint> ; <mods> u`, using the *shifted* character so
+///     the program can recover both the logical key and the produced
+///     text in one sequence.
 ///
 /// Per the spec, plain (unmodified) keys keep their legacy byte under
-/// flag 1 — only modified keys change format. That matches what
-/// opencode / Claude Code / Codex CLI expect: Shift+Enter shows up as
-/// a distinct event, plain Enter still arrives as `\r`.
+/// flag 1 — only modified keys change format. For Ctrl+letter, we
+/// only emit CSI-u where the legacy byte is ambiguous; everywhere else
+/// the legacy byte is the canonical encoding that modern TUIs bind on
+/// (opencode's command panel on `\x10`, etc.).
 Uint8List? encodeKeyWithKitty(
   LogicalKeyboardKey key,
   String? character, {
@@ -541,33 +549,59 @@ Uint8List? encodeKeyWithKitty(
     return _csiU(keycode, mods);
   }
 
-  // 2. Ctrl + letter → keycode is the Ctrl control byte (1..26). Same
-  // for Ctrl + a few non-letter symbols that produce stable control
-  // bytes (matching the legacy encoder's `if (ctrl)` block).
-  if (ctrl && !shift && !alt && !meta && !superPressed) {
+// 2. Ctrl + printable, with any combination of modifiers. We only emit
+  //    CSI-u for the cases where the legacy control byte collides with
+  //    another key:
+  //      Ctrl+I  (0x09) collides with Tab
+  //      Ctrl+M  (0x0D) collides with Enter
+  //      Ctrl+[  (0x1B) collides with Escape
+  //      Ctrl+Space (0x00) collides with NUL
+  //    For everything else (Ctrl+P = 0x10, Ctrl+R = 0x12, Ctrl+T = 0x14,
+  //    Ctrl+N = 0x0E, …) the legacy byte is unique, so we fall through
+  //    to `encodeKey` and emit it directly. Apps that listen on the
+  //    legacy byte — opencode's command panel matching on \x10, btop /
+  //    htop history keys, etc. — keep working unchanged, and apps that
+  //    bind Ctrl+I / Ctrl+M / Ctrl+[ on the CSI-u form still get full
+  //    disambiguation from Tab / Enter / Escape (with the full modifier
+  //    mask in `mods`).
+  //
+  //    Examples:
+  //      Ctrl + P              → falls through, encodeKey emits \x10
+  //      Ctrl + Shift + P      → falls through, encodeKey emits \x10
+  //      Ctrl + R              → falls through, encodeKey emits \x12
+  //      Ctrl + T              → falls through, encodeKey emits \x14
+  //      Ctrl + I              → CSI 9;5 u   (mods = 1 + ctrl)
+  //      Ctrl + Shift + I      → CSI 9;6 u   (mods = 1 + shift + ctrl)
+  //      Ctrl + M              → CSI 13;5 u
+  //      Ctrl + [              → CSI 27;5 u
+  //      Ctrl + Space          → CSI 0;5 u
+  if (ctrl) {
     final ch = (character != null && character.length == 1)
         ? character
         : (key.keyLabel.length == 1 ? key.keyLabel : null);
     if (ch != null) {
       final c = ch.toLowerCase().codeUnitAt(0);
-      if (c >= 0x61 && c <= 0x7a) return _csiU(c - 0x60, mods); // a..z
-      switch (ch) {
-        case ' ':
-          return _csiU(0x00, mods);
-        case '[':
-          return _csiU(0x1b, mods);
-        case '\\':
-          return _csiU(0x1c, mods);
-        case ']':
-          return _csiU(0x1d, mods);
-        case '^':
-          return _csiU(0x1e, mods);
-        case '_':
-        case '/':
-          return _csiU(0x1f, mods);
+      // Ctrl+I (0x69) collides with Tab (0x09); Ctrl+M (0x6D) collides
+      // with Enter (0x0D). Emit CSI-u so the app can disambiguate.
+      if (c == 0x69 /*i*/ || c == 0x6d /*m*/) {
+        return _csiU(c - 0x60, mods);
       }
+      // Ctrl+[ (0x5B) collides with Escape (0x1B). Emit CSI-u.
+      if (ch == '[') {
+        return _csiU(0x1b, mods);
+      }
+      // Other Ctrl+letter / Ctrl+symbol: unique legacy byte — let
+      // `encodeKey` emit it.
     }
-    if (key == LogicalKeyboardKey.space) return _csiU(0x00, mods);
+    // Ctrl+Space (0x20 / 0x00) collides with NUL. Emit CSI-u. Done
+    // outside the `ch != null` guard because Windows sometimes delivers
+    // character = null for Space.
+    if (key == LogicalKeyboardKey.space) {
+      return _csiU(0x00, mods);
+    }
+    // Other Ctrl+letter / Ctrl+symbol: unique legacy byte; let
+    // `encodeKey` emit it so apps listening on the legacy byte see
+    // Ctrl+P, Ctrl+R, Ctrl+T, … as a stock alacritty would.
   }
 
   // 3. Printable with a non-Ctrl modifier — encode the produced
