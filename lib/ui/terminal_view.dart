@@ -808,6 +808,7 @@ class TerminalViewState extends State<TerminalView>
                         cellWidth: _metrics.width,
                         cellHeight: _metrics.height,
                         blinkOn: _blinkOn,
+                        backgroundOpacity: widget.backgroundOpacity,
                         selectionColor:
                             0x55000000 | (widget.theme.selection & 0xFFFFFF),
                         searchColors: SearchColors(

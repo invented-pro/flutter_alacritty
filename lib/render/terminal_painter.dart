@@ -92,6 +92,7 @@ class TerminalPainter extends CustomPainter {
     required this.selectionColor,
     required this.searchColors,
     required this.hintColors,
+    this.backgroundOpacity = 1.0,
   })  : _paintGeneration = grid.generation,
         super(repaint: Listenable.merge([grid, blinkOn]));
 
@@ -103,6 +104,14 @@ class TerminalPainter extends CustomPainter {
   final int selectionColor;
   final SearchColors searchColors;
   final HintColors hintColors;
+
+  /// Opacity (0.0–1.0) applied to every cell background fill in Pass 1.
+  /// Foreground glyphs, the cursor and the selection overlay keep their
+  /// full alpha, so lowering this makes the terminal background
+  /// see-through while text stays opaque — mirroring Alacritty's
+  /// `window.opacity`. Defaults to 1.0 (fully opaque), the historical
+  /// behavior.
+  final double backgroundOpacity;
   final int _paintGeneration;
 
   @override
@@ -131,6 +140,16 @@ class TerminalPainter extends CustomPainter {
     // cell — a faint grid, worst on fractional DPR / fractional widget offsets
     // when embedded. Solid pixel-aligned fills tile exactly (matches alacritty's
     // background quads). Same reasoning for the selection / cursor fills below.
+    //
+    // Background opacity: when `backgroundOpacity` < 1.0, cells still using the
+    // *default* background paint NO quad — a single background layer beneath the
+    // grid (provided by the host) supplies the terminal background uniformly,
+    // avoiding the per-cell seams and pane-gutter leaks you'd get from scaling
+    // each quad's alpha. Cells with an explicit ANSI background (and inverse /
+    // match / hint highlights) still paint opaquely so TUIs render correctly.
+    // At 1.0 every background paints opaque (the historical behavior).
+    final transparentDefaultBg = backgroundOpacity < 1.0;
+    final defaultBg = grid.defaultBg;
     final bgPaint = Paint()..isAntiAlias = false;
     for (var row = firstRow; row < rows; row++) {
       final y = row * cellHeight;
@@ -146,9 +165,13 @@ class TerminalPainter extends CustomPainter {
           searchColors,
           hintColors,
         );
-        bgPaint.color = Color(0xFF000000 | ec.bg);
-        canvas.drawRect(Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
-        if (isSelected(grid.flagsAt(row, col))) {
+        final drawBg = !(transparentDefaultBg && ec.bg == defaultBg);
+        if (drawBg) {
+          bgPaint.color = Color(0xFF000000 | ec.bg);
+          canvas.drawRect(
+              Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight), bgPaint);
+        }
+        if (isSelected(flags)) {
           canvas.drawRect(
             Rect.fromLTWH(col * cellWidth, y, cellWidth, cellHeight),
             Paint()
@@ -273,5 +296,6 @@ class TerminalPainter extends CustomPainter {
       old.grid != grid ||
       old._paintGeneration != _paintGeneration ||
       old.cellWidth != cellWidth ||
-      old.cellHeight != cellHeight;
+      old.cellHeight != cellHeight ||
+      old.backgroundOpacity != backgroundOpacity;
 }

@@ -102,6 +102,13 @@ abstract class TerminalGridView implements Listenable {
   /// `shouldRepaint`.
   int get generation;
 
+  /// The configured default background color (packed `0x00RRGGBB`) used to
+  /// fill blank/untouched cells. Painters compare each cell's effective bg
+  /// against this to tell "default background" cells (which can be left
+  /// transparent so a background layer beneath shows through) from cells
+  /// with an explicit ANSI background (which must paint opaquely).
+  int get defaultBg;
+
   /// Cell accessors. `row` in `0..rows-1` reads the viewport; `row == -1` reads
   /// the overscan line (the row just above the viewport top) used to paint the
   /// [scrollFraction] sliver. Other negative rows are not valid.
@@ -176,6 +183,8 @@ class MirrorGrid extends ChangeNotifier implements TerminalGridView {
   int get cursorColor => _cursorColor;
   @override
   double get scrollFraction => _scrollFraction;
+  @override
+  int get defaultBg => _defaultBg;
 
   @override
   int codepointAt(int row, int col) =>
