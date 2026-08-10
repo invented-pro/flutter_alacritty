@@ -142,5 +142,31 @@ void main() {
           kFlagMatchCurrent | kFlagMatch | kFlagHyperlink, base, search, hint);
       expect(r.bg, 0xF4BF75);
     });
+
+    // A program-drawn inverse-video cursor (Helix marks its cursor cell with
+    // SGR inverse) over a highlight must swap the highlight colors so the
+    // cursor cell reads as the inverse of its neighbors instead of being
+    // overwritten by the plain highlight colors (which hid the cursor).
+    test('FLAG_INVERSE swaps the hyperlink hint colors', () {
+      final r = applyMatchOrHint(kFlagHyperlink | kFlagInverse, base, search, hint);
+      expect(r.fg, hint.bg); // amber fg
+      expect(r.bg, hint.fg); // dark bg — inverted vs a plain link cell
+    });
+    test('FLAG_INVERSE swaps the search-match colors', () {
+      final r = applyMatchOrHint(kFlagMatch | kFlagInverse, base, search, hint);
+      expect(r.fg, search.matchBg);
+      expect(r.bg, search.matchFg);
+    });
+    test('FLAG_INVERSE swaps the focused-match colors', () {
+      final r =
+          applyMatchOrHint(kFlagMatchCurrent | kFlagInverse, base, search, hint);
+      expect(r.fg, search.focusedBg);
+      expect(r.bg, search.focusedFg);
+    });
+    test('hyperlink without inverse keeps the plain hint colors', () {
+      final r = applyMatchOrHint(kFlagHyperlink, base, search, hint);
+      expect(r.fg, hint.fg);
+      expect(r.bg, hint.bg);
+    });
   });
 }

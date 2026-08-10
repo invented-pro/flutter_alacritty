@@ -54,19 +54,26 @@ class HintColors {
   final int fg;
 }
 
-/// Effective fg/bg with full precedence: focused-match > match > hyperlink > base.
+/// Effective fg/bg with full precedence: focused-match > match > hyperlink >
+/// base. The match/hint colors are swapped when [kFlagInverse] is set, so a
+/// program-drawn inverse-video cursor (Helix marks its cursor cell with SGR
+/// inverse) stays visible over a hyperlink / search highlight instead of being
+/// overwritten by the plain highlight colors.
 ({int fg, int bg}) applyMatchOrHint(
     int flags, ({int fg, int bg}) ec, SearchColors search, HintColors hint) {
+  final swap = flags & kFlagInverse != 0;
+  ({int fg, int bg}) inv(int f, int b) =>
+      swap ? (fg: b, bg: f) : (fg: f, bg: b);
   if (flags & kFlagMatchCurrent != 0) {
-    return (fg: search.focusedFg, bg: search.focusedBg);
+    return inv(search.focusedFg, search.focusedBg);
   }
   if (flags & kFlagMatch != 0) {
-    return (fg: search.matchFg, bg: search.matchBg);
+    return inv(search.matchFg, search.matchBg);
   }
   if (flags & kFlagHyperlink != 0) {
-    return (fg: hint.fg, bg: hint.bg);
+    return inv(hint.fg, hint.bg);
   }
-  return ec;
+  return ec; // ec already has inverse applied by effectiveColors.
 }
 
 class SearchColors {
