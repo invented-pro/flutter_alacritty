@@ -17,6 +17,14 @@ Color cursorInk(int cursorColor, int inverseFg) {
   return Color(0xFF000000 | (cursorColor & 0xFFFFFF));
 }
 
+/// Resolve the cursor source color: a program OSC 12 color wins; otherwise the
+/// host-configured [defaultCursorColor]; otherwise [kCursorColorUnset] (which
+/// makes [cursorInk] fall back to inverse video using the cell's fg).
+int resolveCursorColor(int osc12Color, int? defaultCursorColor) {
+  if (osc12Color != kCursorColorUnset) return osc12Color;
+  return defaultCursorColor ?? kCursorColorUnset;
+}
+
 /// Packed-RGB fg/bg after applying inverse (swap) and dim (darken fg).
 ({int fg, int bg}) effectiveColors(int flags, int rawFg, int rawBg) {
   var fg = rawFg, bg = rawBg;
@@ -100,6 +108,7 @@ class TerminalPainter extends CustomPainter {
     required this.searchColors,
     required this.hintColors,
     this.backgroundOpacity = 1.0,
+    this.defaultCursorColor,
   })  : _paintGeneration = grid.generation,
         super(repaint: Listenable.merge([grid, blinkOn]));
 
@@ -111,6 +120,12 @@ class TerminalPainter extends CustomPainter {
   final int selectionColor;
   final SearchColors searchColors;
   final HintColors hintColors;
+
+  /// Host-configured cursor tint (packed `0xRRGGBB`) used when the program
+  /// hasn't set one via OSC 12 ([MirrorGrid.cursorColor] ==
+  /// [kCursorColorUnset]). `null` keeps the classic inverse-video cursor
+  /// (cursor ink = the cell's effective fg).
+  final int? defaultCursorColor;
 
   /// Opacity (0.0–1.0) applied to every cell background fill in Pass 1.
   /// Foreground glyphs, the cursor and the selection overlay keep their
@@ -259,10 +274,14 @@ class TerminalPainter extends CustomPainter {
       final x = cc * cellWidth, y = cr * cellHeight;
       // Cursor ink = the cell's effective fg (an inverse cursor); the glyph is
       // redrawn in the effective bg so a block cursor reads as a true inversion.
+      // A program OSC 12 color (grid.cursorColor) wins; otherwise fall back to
+      // the host-configured defaultCursorColor, then to inverse video.
       final ec = inBounds
           ? effectiveColors(flags, grid.fgAt(cr, cc), grid.bgAt(cr, cc))
           : (fg: 0xD8D8D8, bg: 0x181818);
-      final inkColor = cursorInk(grid.cursorColor, ec.fg);
+      final cursorColor =
+          resolveCursorColor(grid.cursorColor, defaultCursorColor);
+      final inkColor = cursorInk(cursorColor, ec.fg);
       final shape = grid.cursorShape;
       if (shape == 0) {
         // Block: fill with ink, redraw the cell content in the bg color on top.
@@ -304,5 +323,6 @@ class TerminalPainter extends CustomPainter {
       old._paintGeneration != _paintGeneration ||
       old.cellWidth != cellWidth ||
       old.cellHeight != cellHeight ||
-      old.backgroundOpacity != backgroundOpacity;
+      old.backgroundOpacity != backgroundOpacity ||
+      old.defaultCursorColor != defaultCursorColor;
 }

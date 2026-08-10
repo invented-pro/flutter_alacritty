@@ -88,6 +88,7 @@ class TerminalView extends StatefulWidget {
     TerminalStyle? textStyle,
     this.padding,
     this.backgroundOpacity = 1.0,
+    this.cursorColor,
     this.focusNode,
     this.autofocus = true,
     this.mouseCursor = SystemMouseCursors.text,
@@ -117,6 +118,12 @@ class TerminalView extends StatefulWidget {
   final TerminalStyle textStyle;
   final EdgeInsets? padding;
   final double backgroundOpacity;
+
+  /// Host-configured cursor tint (packed `0xRRGGBB`), used when the program
+  /// hasn't set one via OSC 12. `null` (default) keeps the classic
+  /// inverse-video cursor. Passed through to [TerminalPainter].
+  final int? cursorColor;
+
   final FocusNode? focusNode;
   final bool autofocus;
   final MouseCursor mouseCursor;
@@ -809,6 +816,7 @@ class TerminalViewState extends State<TerminalView>
                         cellHeight: _metrics.height,
                         blinkOn: _blinkOn,
                         backgroundOpacity: widget.backgroundOpacity,
+                        defaultCursorColor: widget.cursorColor,
                         selectionColor:
                             0x55000000 | (widget.theme.selection & 0xFFFFFF),
                         searchColors: SearchColors(
