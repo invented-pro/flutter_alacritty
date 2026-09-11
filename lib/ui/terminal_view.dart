@@ -579,6 +579,10 @@ class TerminalViewState extends State<TerminalView>
     );
     final globalRect =
         renderBox.localToGlobal(localRect.topLeft) & localRect.size;
+    // The global rect is kept out of setImeGeometry (platforms want the LOCAL
+    // caret rect) but still participates in change detection: when the pane
+    // moves or resizes while the cursor cell is unchanged (localRect equal),
+    // the transform changed and the OS IME geometry must be re-sent.
     if (globalRect == _lastReportedCaretRect &&
         _lastReportedLocalCaretRect == localRect) {
       return;
@@ -588,7 +592,6 @@ class TerminalViewState extends State<TerminalView>
     _ime.setImeGeometry(
       editableSize: renderBox.size,
       editableTransform: renderBox.getTransformTo(null),
-      globalCaret: globalRect,
       localCaret: localRect,
     );
   }
