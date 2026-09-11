@@ -18,6 +18,25 @@ const TextEditingValue kImeDeleteDetectionBaseline = TextEditingValue(
 ///     to the PTY as UTF-8 bytes.
 ///   onBackspace()            — delete key while the TextInput buffer shrinks.
 ///
+/// Protocol: on attach the editing state is seeded with the two-space
+/// [kImeDeleteDetectionBaseline] sentinel (deletes must stay observable —
+/// IMEs stop issuing delete commands against an empty field). From then on
+/// the platform-side field is NEVER re-truncated via setEditingState while
+/// the session lives. Belief-tracking IMEs (segmented pinyin, Sogou-style
+/// continuous input, …) derive the ranges they pass to setMarkedText from
+/// the field contents they last commanded; an out-of-band truncation
+/// desyncs them — the engine then combines their stale cursor offsets with
+/// the shortened text and emits an editing state whose selection exceeds
+/// the text length, which the framework drops (debug assertion
+/// "Range start N is out of text of length M"), killing all further IME
+/// delivery for the session. Instead, Dart tracks a consumption frontier
+/// ([_consumed]): commits are whatever the field grew beyond the frontier,
+/// a shrink is a backspace (restoring the sentinel only when the deletion
+/// bites into it), and a field that no longer carries the sentinel at all
+/// is a wholesale replace (lone-CJK IMEs) — commit-and-reset. The field is
+/// re-seeded only at attach and after those two repairs: moments when no
+/// marked text is in flight.
+///
 /// Per-frame, the caller should pass cursor geometry via [setImeGeometry] so
 /// the OS IM (fcitx / IBus / macOS IME / etc.) positions its candidate window
 /// adjacent to the cursor cell.
@@ -35,6 +54,10 @@ class ImeSession implements TextInputClient {
   TextInputConnection? _conn;
   bool _composing = false;
   TextEditingValue _editing = kImeDeleteDetectionBaseline;
+
+  /// Offset into the platform-side field text up to which everything has
+  /// already been committed to the PTY. See the class doc.
+  int _consumed = kImeDeleteDetectionBaseline.text.length;
 
   bool get isAttached => _conn != null && _conn!.attached;
 
@@ -105,6 +128,7 @@ class ImeSession implements TextInputClient {
   void _resetEditing({bool notify = true}) {
     _editing = kImeDeleteDetectionBaseline;
     _composing = false;
+    _consumed = kImeDeleteDetectionBaseline.text.length;
     _conn?.setEditingState(_editing);
     if (notify) onPreeditChanged(null);
   }
@@ -114,38 +138,48 @@ class ImeSession implements TextInputClient {
   @override
   void updateEditingValue(TextEditingValue value) {
     _editing = value;
+    final text = value.text;
     final composing = value.composing;
-    if (composing.isValid && !composing.isCollapsed) {
+    // Release builds don't assert range validity in
+    // TextEditingValue.fromJSON; a desynced engine could hand us an
+    // out-of-bounds composing range, which textInside would turn into a
+    // RangeError. Treat those as "no active composing".
+    final composingActive = composing.isValid &&
+        !composing.isCollapsed &&
+        composing.end <= text.length;
+    if (composingActive) {
       _composing = true;
-      onPreeditChanged(composing.textInside(value.text));
+      onPreeditChanged(composing.textInside(text));
       return;
     }
     _composing = false;
     onPreeditChanged(null);
 
-    final baseline = kImeDeleteDetectionBaseline.text;
-    if (value.text.length < baseline.length) {
-      if (value.text.isNotEmpty && baseline.startsWith(value.text)) {
+    final sentinel = kImeDeleteDetectionBaseline.text;
+    if (text.startsWith(sentinel)) {
+      if (text.length > _consumed) {
+        onCommit(text.substring(_consumed));
+        _consumed = text.length;
+      } else if (text.length < _consumed) {
+        // The platform deleted committed text (backspace / word delete).
         onBackspace();
-      } else if (value.text.isNotEmpty) {
-        // Some IMEs commit without the sentinel prefix (e.g. lone CJK).
-        onCommit(value.text);
+        _consumed = text.length;
       }
+      return;
+    }
+    if (sentinel.startsWith(text)) {
+      // The deletion bit into the sentinel itself ('  ' → ' ' → ''):
+      // report the backspace and restore the two spaces so the next
+      // delete remains observable. IMEs stop issuing delete commands on
+      // an empty field.
+      if (text.isNotEmpty && text.length < _consumed) onBackspace();
       _resetEditing(notify: false);
       return;
     }
-
-    if (value.text.length > baseline.length) {
-      final delta = value.text.substring(baseline.length);
-      if (delta.isNotEmpty) onCommit(delta);
-      _resetEditing(notify: false);
-      return;
-    }
-
-    if (value.text.isNotEmpty && value.text != baseline) {
-      onCommit(value.text);
-      _resetEditing(notify: false);
-    }
+    // The field was replaced wholesale — some IMEs commit lone CJK by
+    // replacing everything instead of inserting at the cursor.
+    if (text.isNotEmpty) onCommit(text);
+    _resetEditing(notify: false);
   }
 
   @override
@@ -159,9 +193,11 @@ class ImeSession implements TextInputClient {
   void insertContent(KeyboardInsertedContent content) {}
   @override
   void performPrivateCommand(String action, Map<String, dynamic> data) {
+    // No _resetEditing here: these selectors arrive without the engine
+    // having mutated its editing model, so re-seeding the field would only
+    // truncate committed history under the IME's feet (see class doc).
     if (action == 'deleteBackward' || action == 'deleteWordBackward') {
       onBackspace();
-      _resetEditing(notify: false);
     }
   }
   @override
@@ -182,9 +218,9 @@ class ImeSession implements TextInputClient {
   void showToolbar() {}
   @override
   void performSelector(String selectorName) {
+    // See performPrivateCommand for why this must not reset the field.
     if (selectorName == 'deleteBackward:') {
       onBackspace();
-      _resetEditing(notify: false);
     }
   }
 }

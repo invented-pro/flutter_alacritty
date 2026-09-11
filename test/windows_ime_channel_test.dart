@@ -161,6 +161,15 @@ void main() {
         reason: 'committed text must reach the PTY exactly once');
     expect(find.byType(PreeditOverlay), findsNothing,
         reason: 'overlay must hide after commit');
+    // Regression (IME desync): the commit must NOT re-seed the editing state.
+    // The attach-time sentinel is the only setEditingState allowed — a
+    // post-commit truncation makes belief-tracking IMEs emit ranges that
+    // overshoot the shortened text, which the framework drops.
+    expect(
+      outgoing.where((c) => c.method == 'TextInput.setEditingState').length,
+      1,
+      reason: 'commit must not truncate the platform field via setEditingState',
+    );
 
     title.dispose();
   });

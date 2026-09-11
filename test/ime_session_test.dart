@@ -101,6 +101,105 @@ void main() {
     });
   });
 
+  group('consumption frontier (no mid-session field truncation)', () {
+    // Regression: the old protocol reset the platform field to the sentinel
+    // after every commit. Belief-tracking IMEs (segmented pinyin, Sogou,
+    // ...) kept issuing setMarkedText with cursor offsets derived from the
+    // pre-reset contents; the engine combined those with the shortened text
+    // and emitted a selection beyond the text length, which the framework
+    // drops ("Range start N is out of text of length M") — permanently
+    // killing IME delivery for the session.
+    test('segmented pinyin: commit then immediate next preedit keeps flowing', () {
+      final preedits = <String?>[];
+      final commits = <String>[];
+      final s = ImeSession(
+        onCommit: commits.add,
+        onPreeditChanged: preedits.add,
+        onBackspace: noopBackspace,
+      );
+      // Long preedit.
+      s.updateEditingValue(const TextEditingValue(
+          text: '  dianbi', composing: TextRange(start: 2, end: 8)));
+      // Candidate commit replaces the composing range; next syllable's
+      // preedit starts immediately, offsets by the committed text.
+      s.updateEditingValue(const TextEditingValue(
+          text: '  点',
+          selection: TextSelection.collapsed(offset: 3)));
+      s.updateEditingValue(const TextEditingValue(
+          text: '  点吧', composing: TextRange(start: 3, end: 4)));
+      s.updateEditingValue(const TextEditingValue(
+          text: '  点吧',
+          selection: TextSelection.collapsed(offset: 5)));
+      expect(commits, ['点', '吧']);
+      expect(preedits, ['dianbi', null, '吧', null]);
+    });
+
+    test('consecutive commits report only the delta beyond the frontier', () {
+      final commits = <String>[];
+      final s = ImeSession(
+        onCommit: commits.add,
+        onPreeditChanged: (_) {},
+        onBackspace: noopBackspace,
+      );
+      s.updateEditingValue(
+          const TextEditingValue(text: '  你', selection: TextSelection.collapsed(offset: 3)));
+      s.updateEditingValue(
+          const TextEditingValue(text: '  你好', selection: TextSelection.collapsed(offset: 4)));
+      expect(commits, ['你', '好']);
+    });
+
+    test('shrinking into committed text fires one backspace per update', () {
+      var backspaces = 0;
+      final s = ImeSession(
+        onCommit: (_) {},
+        onPreeditChanged: (_) {},
+        onBackspace: () => backspaces++,
+      );
+      s.updateEditingValue(
+          const TextEditingValue(text: '  你', selection: TextSelection.collapsed(offset: 3)));
+      expect(backspaces, 0);
+      s.updateEditingValue(
+          const TextEditingValue(text: '  ', selection: TextSelection.collapsed(offset: 2)));
+      expect(backspaces, 1);
+    });
+
+    test('deletion into the sentinel restores it for the next backspace', () {
+      var backspaces = 0;
+      final commits = <String>[];
+      final s = ImeSession(
+        onCommit: commits.add,
+        onPreeditChanged: (_) {},
+        onBackspace: () => backspaces++,
+      );
+      s.updateEditingValue(
+          const TextEditingValue(text: ' ', selection: TextSelection.collapsed(offset: 1)));
+      expect(backspaces, 1);
+      s.updateEditingValue(
+          const TextEditingValue(text: ' ', selection: TextSelection.collapsed(offset: 1)));
+      expect(backspaces, 2);
+      // After the repair the frontier is back at the sentinel: a normal
+      // commit works again.
+      s.updateEditingValue(
+          const TextEditingValue(text: '  好', selection: TextSelection.collapsed(offset: 3)));
+      expect(commits, ['好']);
+    });
+
+    test('wholesale replace commits full text and repairs the frontier', () {
+      final commits = <String>[];
+      final s = ImeSession(
+        onCommit: commits.add,
+        onPreeditChanged: (_) {},
+        onBackspace: noopBackspace,
+      );
+      s.updateEditingValue(const TextEditingValue(
+          text: '的', selection: TextSelection.collapsed(offset: 1)));
+      expect(commits, ['的']);
+      s.updateEditingValue(
+          const TextEditingValue(text: '  好', selection: TextSelection.collapsed(offset: 3)));
+      expect(commits, ['的', '好']);
+    });
+  });
+
   test('performPrivateCommand deleteBackward fires onBackspace', () {
     var backspaces = 0;
     final s = ImeSession(
