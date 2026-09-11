@@ -803,6 +803,7 @@ class TerminalViewState extends State<TerminalView>
               onLongPressMoveUpdate: _onLongPressMoveUpdate,
               onLongPressEnd: _onLongPressEnd,
               child: Stack(
+                clipBehavior: Clip.none,
                 children: [
                   MouseRegion(
                     cursor: _hoverCursor,

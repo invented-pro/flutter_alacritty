@@ -1,10 +1,14 @@
 import 'package:flutter/widgets.dart';
 
-/// Floating preedit (composing) string drawn just below the cursor cell.
+/// Inline preedit (composing) string drawn at the cursor cell, on the cursor's
+/// own row (Windows Terminal / Alacritty convention).
 ///
-/// The OS IM (fcitx / IBus / etc.) draws its OWN candidate window adjacent to
-/// the cursor — we only render the active preedit substring. Callers should
-/// gate construction so this widget is only mounted while [text] is non-empty.
+/// The OS IM (fcitx / IBus / MS Pinyin / etc.) draws its OWN candidate window
+/// anchored below the caret rect we report via `setImeGeometry` — so the
+/// preedit must stay ON the cursor row; placing it below (as before) put it
+/// exactly under the OS candidate pane, which always paints over app content
+/// (preedit became invisible on Windows). Callers should gate construction so
+/// this widget is only mounted while [text] is non-empty.
 class PreeditOverlay extends StatelessWidget {
   const PreeditOverlay({
     required this.text,
@@ -19,8 +23,8 @@ class PreeditOverlay extends StatelessWidget {
   /// The composing substring (`composing.textInside(value.text)` from ImeSession).
   final String text;
 
-  /// Local-coordinates rect of the cursor cell. The overlay floats just below
-  /// it (`cursorRect.bottom + 2`).
+  /// Local-coordinates rect of the cursor cell. The overlay renders inline on
+  /// that row (`cursorRect.top`), starting at the cursor column.
   final Rect cursorRect;
 
   /// Packed RGB (0x00RRGGBB); alpha is forced to full when rendered.
@@ -35,10 +39,12 @@ class PreeditOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Positioned(
       left: cursorRect.left,
-      top: cursorRect.bottom + 2,
+      top: cursorRect.top,
       child: IgnorePointer(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          height: cursorRect.height,
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          alignment: Alignment.centerLeft,
           decoration: BoxDecoration(
             color: Color(0xFF000000 | bg),
             borderRadius: BorderRadius.circular(2),

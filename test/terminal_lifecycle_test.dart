@@ -33,6 +33,8 @@ class _FakePty implements PtyBackend {
   void resize(int rows, int columns) {}
   @override
   void kill() => killed = true;
+  @override
+  void close() {}
 }
 
 void main() {
